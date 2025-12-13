@@ -1,0 +1,81 @@
+package r.messaging.rexms
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import dagger.hilt.android.AndroidEntryPoint
+import r.messaging.rexms.data.AppTheme
+import r.messaging.rexms.data.UserPreferences
+import r.messaging.rexms.presentation.ChatScreen
+import r.messaging.rexms.presentation.ConversationListScreen
+import r.messaging.rexms.presentation.SettingsScreen
+import r.messaging.rexms.ui.theme.RexMSTheme
+import javax.inject.Inject
+
+
+@AndroidEntryPoint
+class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var userPreferences: UserPreferences
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            // Observe Theme
+            val currentTheme by userPreferences.theme
+                .collectAsState(initial = AppTheme.SYSTEM)
+
+            RexMSTheme(appTheme = currentTheme) {
+                AppNavigation()
+            }
+        }
+    }
+}
+
+@Composable
+fun AppNavigation() {
+    val navController = rememberNavController()
+
+    NavHost(navController = navController, startDestination = "home") {
+
+        // 1. Home Screen (List)
+        composable("home") {
+            ConversationListScreen(
+                onNavigateToChat = { threadId, address ->
+                    // Navigate to chat, encoding arguments safely
+                    navController.navigate("chat/$threadId?address=$address")
+                },
+                onNavigateToSettings = {
+                    navController.navigate("settings")
+                }
+            )
+        }
+
+        // 2. Chat Screen (Details)
+        composable(
+            route = "chat/{threadId}?address={address}",
+            arguments = listOf(
+                navArgument("threadId") { type = NavType.LongType },
+                navArgument("address") { type = NavType.StringType }
+            )
+        ) {
+            ChatScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        // 3. Settings Screen
+        composable("settings") {
+            SettingsScreen(onBack = { navController.popBackStack() })
+        }
+    }
+}
