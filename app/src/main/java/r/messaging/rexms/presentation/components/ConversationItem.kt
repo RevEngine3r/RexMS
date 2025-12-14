@@ -1,7 +1,7 @@
 package r.messaging.rexms.presentation.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -19,13 +19,17 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConversationItem(
     conversation: Conversation,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    isSelected: Boolean
 ) {
     val isUnread = !conversation.read
     val fontWeight = if (isUnread) FontWeight.Bold else FontWeight.Normal
+    val containerColor = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
 
     val avatarColor = remember(conversation.threadId) {
         val colors = listOf(
@@ -76,9 +80,12 @@ fun ConversationItem(
                 )
             }
         },
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = onLongClick
+        ),
         colors = ListItemDefaults.colors(
-            containerColor = Color.Transparent
+            containerColor = containerColor
         )
     )
 }
