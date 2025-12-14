@@ -77,6 +77,7 @@ fun ConversationListScreen(
     var active by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showNewMessageScreen by remember { mutableStateOf(false) }
+    val selectedConversations = remember { mutableStateListOf<Long>() }
 
     // --- DEFAULT APP CHECKER ---
     val checkDefaultStatus = remember {
@@ -115,8 +116,15 @@ fun ConversationListScreen(
         }
     }
 
-    BackHandler(enabled = active || showNewMessageScreen) {
-        if (showNewMessageScreen) showNewMessageScreen = false else active = false
+    val (archived, unarchived) = filteredConversations.partition { it.archived }
+    var showArchived by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = active || showNewMessageScreen || selectedConversations.isNotEmpty()) {
+        when {
+            selectedConversations.isNotEmpty() -> selectedConversations.clear()
+            showNewMessageScreen -> showNewMessageScreen = false
+            active -> active = false
+        }
     }
 
     AnimatedContent(
@@ -140,65 +148,108 @@ fun ConversationListScreen(
         } else {
             Scaffold(
                 topBar = {
-                    SearchBar(
-                        inputField = {
-                            SearchBarDefaults.InputField(
-                                query = query,
-                                onQueryChange = { query = it },
-                                onSearch = { active = false },
-                                expanded = active,
-                                onExpandedChange = { active = it },
-                                placeholder = { Text("Search conversations") },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.Search,
-                                        contentDescription = null
-                                    )
-                                },
-                                trailingIcon = {
-                                    Box {
-                                        IconButton(onClick = { showMenu = true }) {
-                                            Icon(Icons.Default.MoreVert, "Options")
-                                        }
-                                        DropdownMenu(
-                                            expanded = showMenu,
-                                            onDismissRequest = { showMenu = false }
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text("Settings") },
-                                                onClick = {
-                                                    onNavigateToSettings(); showMenu = false
-                                                }
-                                            )
-                                        }
+                    if (selectedConversations.isNotEmpty()) {
+                        val selectedConversationObjects = conversations.filter { it.threadId in selectedConversations }
+                        val selectionContainsUnarchived = selectedConversationObjects.any { !it.archived }
+                        val selectionContainsArchived = selectedConversationObjects.any { it.archived }
+
+                        TopAppBar(
+                            title = { Text("${selectedConversations.size} selected") },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedConversations.clear() }) {
+                                    Icon(Icons.Default.Close, "Clear selection")
+                                }
+                            },
+                            actions = {
+                                if (selectionContainsUnarchived) {
+                                    IconButton(onClick = {
+                                        viewModel.archiveThreads(selectedConversations.toSet())
+                                        selectedConversations.clear()
+                                    }) {
+                                        Icon(Icons.Default.Archive, "Archive")
                                     }
                                 }
-                            )
-                        },
-                        expanded = active,
-                        onExpandedChange = { active = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        content = {
-                            if (smsPermission.status.isGranted) {
-                                LazyColumn {
-                                    items(filteredConversations) { conversation ->
-                                        ConversationItem(
-                                            conversation = conversation,
-                                            onClick = {
+                                if (selectionContainsArchived) {
+                                    IconButton(onClick = {
+                                        viewModel.unarchiveThreads(selectedConversations.toSet())
+                                        selectedConversations.clear()
+                                    }) {
+                                        Icon(Icons.Default.Unarchive, "Unarchive")
+                                    }
+                                }
+                            }
+                        )
+                    } else {
+                        SearchBar(
+                            inputField = {
+                                SearchBarDefaults.InputField(
+                                    query = query,
+                                    onQueryChange = { query = it },
+                                    onSearch = { active = false },
+                                    expanded = active,
+                                    onExpandedChange = { active = it },
+                                    placeholder = { Text("Search conversations") },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Search,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        Box {
+                                            IconButton(onClick = { showMenu = true }) {
+                                                Icon(Icons.Default.MoreVert, "Options")
+                                            }
+                                            DropdownMenu(
+                                                expanded = showMenu,
+                                                onDismissRequest = { showMenu = false }
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Settings") },
+                                                    onClick = {
+                                                        onNavigateToSettings(); showMenu = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                )
+                            },
+                            expanded = active,
+                            onExpandedChange = { active = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            content = {
+                                if (smsPermission.status.isGranted) {
+                                    ConversationList(
+                                        conversations = filteredConversations,
+                                        selectedConversations = selectedConversations,
+                                        onConversationClick = { conversation ->
+                                            if (selectedConversations.isNotEmpty()) {
+                                                if (selectedConversations.contains(conversation.threadId)) {
+                                                    selectedConversations.remove(conversation.threadId)
+                                                } else {
+                                                    selectedConversations.add(conversation.threadId)
+                                                }
+                                            } else {
                                                 onNavigateToChat(
                                                     conversation.threadId,
                                                     conversation.address
                                                 )
                                                 active = false
                                             }
-                                        )
-                                    }
+                                        },
+                                        onConversationLongClick = { conversation ->
+                                            if (!selectedConversations.contains(conversation.threadId)) {
+                                                selectedConversations.add(conversation.threadId)
+                                            }
+                                        }
+                                    )
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
                 },
                 floatingActionButton = {
                     if (smsPermission.status.isGranted) {
@@ -304,20 +355,57 @@ fun ConversationListScreen(
                                 Text("No messages found", color = Color.Gray)
                             }
                         } else {
-                            LazyColumn(
-                                contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
-                            ) {
-                                items(
-                                    filteredConversations,
-                                    key = { it.threadId }) { conversation ->
-                                    ConversationItem(
-                                        conversation = conversation,
-                                        onClick = {
-                                            onNavigateToChat(
-                                                conversation.threadId,
-                                                conversation.address
-                                            )
+                            Column {
+                                if (archived.isNotEmpty() && !showArchived) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { showArchived = true }
+                                            .padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Archive, contentDescription = "Archived")
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Text("Archived (${archived.count { !it.read }})")
+                                    }
+                                }
+                                val onConversationClick = { conversation: r.messaging.rexms.data.Conversation ->
+                                    if (selectedConversations.isNotEmpty()) {
+                                        if (selectedConversations.contains(conversation.threadId)) {
+                                            selectedConversations.remove(conversation.threadId)
+                                        } else {
+                                            selectedConversations.add(conversation.threadId)
                                         }
+                                    } else {
+                                        onNavigateToChat(
+                                            conversation.threadId,
+                                            conversation.address
+                                        )
+                                    }
+                                }
+                                val onConversationLongClick = { conversation: r.messaging.rexms.data.Conversation ->
+                                    if (!selectedConversations.contains(conversation.threadId)) {
+                                        selectedConversations.add(conversation.threadId)
+                                    }
+                                }
+                                if (showArchived) {
+                                    Column {
+                                        TextButton(onClick = { showArchived = false }) {
+                                            Text("Go back")
+                                        }
+                                        ConversationList(
+                                            conversations = archived,
+                                            selectedConversations = selectedConversations,
+                                            onConversationClick = onConversationClick,
+                                            onConversationLongClick = onConversationLongClick
+                                        )
+                                    }
+                                } else {
+                                    ConversationList(
+                                        conversations = unarchived,
+                                        selectedConversations = selectedConversations,
+                                        onConversationClick = onConversationClick,
+                                        onConversationLongClick = onConversationLongClick
                                     )
                                 }
                             }
@@ -325,6 +413,29 @@ fun ConversationListScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun ConversationList(
+    conversations: List<r.messaging.rexms.data.Conversation>,
+    selectedConversations: List<Long>,
+    onConversationClick: (r.messaging.rexms.data.Conversation) -> Unit,
+    onConversationLongClick: (r.messaging.rexms.data.Conversation) -> Unit
+) {
+    LazyColumn(
+        contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
+    ) {
+        items(
+            conversations,
+            key = { it.threadId }) { conversation ->
+            ConversationItem(
+                conversation = conversation,
+                isSelected = selectedConversations.contains(conversation.threadId),
+                onClick = { onConversationClick(conversation) },
+                onLongClick = { onConversationLongClick(conversation) }
+            )
         }
     }
 }

@@ -14,6 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
@@ -21,7 +22,8 @@ import javax.inject.Singleton
 
 @Singleton
 class SmsRepository @Inject constructor(
-    @param:ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context,
+    private val userPreferences: UserPreferences
 ) {
     private val contentResolver: ContentResolver = context.contentResolver
 
@@ -30,16 +32,22 @@ class SmsRepository @Inject constructor(
 
     // (If you deleted them, I can paste them again, but the read logic is SDK-agnostic)
     // RE-PASTING READ LOGIC FOR COMPLETENESS:
-    fun getConversations(): Flow<List<Conversation>> = callbackFlow {
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                trySend(fetchConversations())
+    fun getConversations(): Flow<List<Conversation>> {
+        val conversationsFlow = callbackFlow {
+            val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    trySend(fetchConversations())
+                }
             }
+            contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
+            trySend(fetchConversations())
+            awaitClose { contentResolver.unregisterContentObserver(observer) }
+        }.flowOn(Dispatchers.IO)
+
+        return conversationsFlow.combine(userPreferences.archivedThreads) { conversations, archivedIds ->
+            conversations.map { it.copy(archived = it.threadId in archivedIds) }
         }
-        contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
-        trySend(fetchConversations())
-        awaitClose { contentResolver.unregisterContentObserver(observer) }
-    }.flowOn(Dispatchers.IO)
+    }
 
     fun getMessagesForThread(threadId: Long): Flow<List<Message>> = callbackFlow {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
@@ -146,6 +154,14 @@ class SmsRepository @Inject constructor(
     }
 
     // --- WRITING DATA (Updated for SDK 28-36) ---
+
+    suspend fun archiveThreads(threadIds: Set<Long>) {
+        userPreferences.archiveThreads(threadIds)
+    }
+
+    suspend fun unarchiveThreads(threadIds: Set<Long>) {
+        userPreferences.unarchiveThreads(threadIds)
+    }
 
     fun sendMessage(destinationAddress: String, body: String, subId: Int?) {
         try {

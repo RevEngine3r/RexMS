@@ -12,6 +12,7 @@ data class Conversation(
     val body: String,             // Snippet of the last message
     val date: Long,               // Timestamp of last message
     val read: Boolean,            // Is the last message read?
+    val archived: Boolean = false,
     val senderName: String? = null, // Resolved contact name (optional)
     val photoUri: String? = null    // Contact photo URI (optional)
 )
