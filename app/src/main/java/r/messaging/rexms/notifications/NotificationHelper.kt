@@ -7,18 +7,69 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
 import r.messaging.rexms.MainActivity
 import r.messaging.rexms.R
+import r.messaging.rexms.data.ContactChecker
+import r.messaging.rexms.data.UserPreferences
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class NotificationHelper(private val context: Context) {
-
+@Singleton
+class NotificationHelper @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val userPreferences: UserPreferences,
+    private val contactChecker: ContactChecker
+) {
     companion object {
         const val CHANNEL_ID = "sms_channel"
+        const val CHANNEL_ID_SILENT = "sms_channel_silent"
         const val NOTIFICATION_ID = 1001
     }
 
-    fun showSmsNotification(sender: String?, body: String) {
-        createChannel()
+    init {
+        createNotificationChannels()
+    }
+
+    private fun createNotificationChannels() {
+        // Normal notification channel with sound
+        val normalChannel = NotificationChannel(
+            CHANNEL_ID,
+            "SMS Messages",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Notifications for incoming SMS messages"
+        }
+
+        // Silent notification channel for unknown contacts
+        val silentChannel = NotificationChannel(
+            CHANNEL_ID_SILENT,
+            "SMS Messages (Silent)",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Silent notifications for unknown contacts"
+            setSound(null, null)
+            enableVibration(false)
+        }
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(normalChannel)
+        notificationManager.createNotificationChannel(silentChannel)
+    }
+
+    suspend fun showSmsNotification(sender: String?, body: String) {
+        if (sender == null) return
+
+        val isUnknown = contactChecker.isUnknownContact(sender)
+        val noNotificationUnknown = userPreferences.noNotificationForUnknown.first()
+
+        // If unknown contact and "No Notification" is enabled, use silent channel
+        val channelId = if (isUnknown && noNotificationUnknown) {
+            CHANNEL_ID_SILENT
+        } else {
+            CHANNEL_ID
+        }
 
         // Intent to open App when clicked
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -28,33 +79,33 @@ class NotificationHelper(private val context: Context) {
             context, 0, intent, PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher) // Ensure this icon exists
-            .setContentTitle(sender ?: "Unknown")
+        val displayName = contactChecker.getContactName(sender) ?: sender
+
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(displayName)
             .setContentText(body)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(
+                if (channelId == CHANNEL_ID_SILENT) 
+                    NotificationCompat.PRIORITY_LOW 
+                else 
+                    NotificationCompat.PRIORITY_HIGH
+            )
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
+            .apply {
+                // Ensure silent notifications have no sound/vibration
+                if (channelId == CHANNEL_ID_SILENT) {
+                    setSound(null)
+                    setVibrate(null)
+                }
+            }
 
         try {
-            // Check permission for Android 13+
-            // (Assuming permission is granted since we asked at startup)
             NotificationManagerCompat.from(context)
-                .notify(NOTIFICATION_ID, builder.build())
+                .notify(sender.hashCode(), builder.build())
         } catch (e: SecurityException) {
             // Permission missing
         }
-    }
-
-    private fun createChannel() {
-        val name = "Incoming SMS"
-        val descriptionText = "Notifications for new messages"
-        val importance = NotificationManager.IMPORTANCE_HIGH
-        val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
-            description = descriptionText
-        }
-        val notificationManager: NotificationManager =
-            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.createNotificationChannel(channel)
     }
 }
