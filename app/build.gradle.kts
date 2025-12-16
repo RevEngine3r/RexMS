@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt.android)
 }
@@ -32,9 +33,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            
-            // Signing config would go here for production builds
-            // signingConfig = signingConfigs.getByName("release")
         }
         
         debug {
@@ -106,6 +104,9 @@ dependencies {
     
     // Coil for Image Loading (MMS support)
     implementation(libs.coil.compose)
+    
+    // Kotlin Serialization (for reactions storage)
+    implementation(libs.kotlin.serialization.json)
 
     // Testing
     testImplementation(libs.junit)
