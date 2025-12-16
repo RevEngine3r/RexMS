@@ -14,6 +14,8 @@ import android.telephony.SmsManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import r.messaging.rexms.data.local.*
 import javax.inject.Inject
@@ -38,6 +41,7 @@ class SmsRepositoryOptimized @Inject constructor(
     private val contentResolver: ContentResolver = context.contentResolver
     private val conversationDao = database.conversationDao()
     private val messageDao = database.messageDao()
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     
     // Contact name cache to avoid repeated lookups
     private val contactCache = mutableMapOf<String, String?>()
@@ -99,7 +103,7 @@ class SmsRepositoryOptimized @Inject constructor(
             .toSet()
         
         if (unknownThreadIds.isNotEmpty()) {
-            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            repositoryScope.launch {
                 userPreferences.archiveThreads(unknownThreadIds)
             }
         }
@@ -114,14 +118,14 @@ class SmsRepositoryOptimized @Inject constructor(
     }
 
     private fun triggerBackgroundSync() {
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        repositoryScope.launch {
             syncConversationsFromProvider()
             observeConversationChanges()
         }
     }
 
     private fun triggerMessageSync(threadId: Long) {
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        repositoryScope.launch {
             syncMessagesFromProvider(threadId)
             observeMessageChanges(threadId)
         }
@@ -131,7 +135,7 @@ class SmsRepositoryOptimized @Inject constructor(
         callbackFlow {
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
-                    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                    repositoryScope.launch {
                         delay(500) // Debounce rapid changes
                         syncConversationsFromProvider()
                     }
@@ -146,7 +150,7 @@ class SmsRepositoryOptimized @Inject constructor(
         callbackFlow {
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
-                    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                    repositoryScope.launch {
                         delay(300)
                         syncMessagesFromProvider(threadId)
                     }
@@ -389,7 +393,7 @@ class SmsRepositoryOptimized @Inject constructor(
                 Log.d("SmsRepoOpt", "Deleted $deletedCount messages from thread $threadId")
                 
                 // Also delete from cache
-                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                repositoryScope.launch {
                     conversationDao.deleteConversation(threadId)
                     messageDao.deleteMessagesForThread(threadId)
                 }
@@ -414,7 +418,7 @@ class SmsRepositoryOptimized @Inject constructor(
                     arrayOf(messageId.toString())
                 )
                 
-                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                repositoryScope.launch {
                     messageDao.deleteMessage(messageId)
                 }
             }
