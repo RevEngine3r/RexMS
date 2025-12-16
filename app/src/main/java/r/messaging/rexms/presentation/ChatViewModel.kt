@@ -3,41 +3,60 @@ package r.messaging.rexms.presentation
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import r.messaging.rexms.data.Message
-import r.messaging.rexms.data.SmsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import r.messaging.rexms.data.SmsRepository
 import javax.inject.Inject
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val repository: SmsRepository,
-    savedStateHandle: SavedStateHandle // To read navigation arguments
+    savedStateHandle: SavedStateHandle,
+    private val repository: SmsRepository
 ) : ViewModel() {
 
-    // Get the threadId passed from the navigation route
-    // We will define the route as "chat/{threadId}" later
-    private val threadId: Long = checkNotNull(savedStateHandle["threadId"])
+    private val threadId: Long = savedStateHandle["threadId"] ?: 0L
+    private val address: String = savedStateHandle["address"] ?: ""
 
-    // Also get the address/number for sending new messages
-    private val address: String = checkNotNull(savedStateHandle["address"])
+    val messages = repository.getMessagesForThread(threadId)
 
-    val messages: StateFlow<List<Message>> = repository.getMessagesForThread(threadId)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    private val _sendError = MutableStateFlow<String?>(null)
+    val sendError: StateFlow<String?> = _sendError.asStateFlow()
 
-    fun sendMessage(body: String) {
-        if (body.isBlank()) return
+    private val _isSending = MutableStateFlow(false)
+    val isSending: StateFlow<Boolean> = _isSending.asStateFlow()
+
+    init {
+        // Mark thread as read when opening chat
+        markAsRead()
+    }
+
+    fun sendMessage(text: String) {
+        if (text.isBlank()) return
 
         viewModelScope.launch {
-            // Defaulting to first SIM (subId = -1) for now
-            repository.sendMessage(address, body, null)
+            _isSending.value = true
+            _sendError.value = null
+            
+            try {
+                repository.sendMessage(address, text.trim(), null)
+            } catch (e: Exception) {
+                _sendError.value = e.message ?: "Failed to send message"
+            } finally {
+                _isSending.value = false
+            }
         }
+    }
+
+    private fun markAsRead() {
+        viewModelScope.launch {
+            repository.markThreadAsRead(threadId)
+        }
+    }
+
+    fun clearSendError() {
+        _sendError.value = null
     }
 }
