@@ -47,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import r.messaging.rexms.data.ContactItem
+import r.messaging.rexms.data.Conversation
 import r.messaging.rexms.presentation.components.ConversationItem
 import kotlin.collections.filter
 
@@ -216,6 +217,28 @@ fun ConversationListScreen(
                                 conversations = unarchived,
                                 selectedConversations = selectedConversations,
                                 onConversationClick = { conversation ->
+                        }
+
+                        if (conversations.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("No messages found", color = Color.Gray)
+                            }
+                        } else {
+                            Column {
+                                if (archived.isNotEmpty() && !showArchived) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { showArchived = true }
+                                            .padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Archive, contentDescription = "Archived")
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Text("Archived (${archived.count { !it.read }})")
+                                    }
+                                }
+                                val onConversationClick = { conversation: Conversation ->
                                     if (selectedConversations.isNotEmpty()) {
                                         if (selectedConversations.contains(conversation.threadId)) {
                                             selectedConversations.remove(conversation.threadId)
@@ -231,6 +254,9 @@ fun ConversationListScreen(
                                     }
                                 },
                                 onConversationLongClick = { conversation ->
+                                    Unit
+                                }
+                                val onConversationLongClick = { conversation: Conversation ->
                                     if (!selectedConversations.contains(conversation.threadId)) {
                                         selectedConversations.add(conversation.threadId)
                                     }
@@ -239,6 +265,63 @@ fun ConversationListScreen(
                         }
                     }
                 )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ConversationList(
+    conversations: List<Conversation>,
+    selectedConversations: List<Long>,
+    onConversationClick: (Conversation) -> Unit,
+    onConversationLongClick: (Conversation) -> Unit
+) {
+    LazyColumn(
+        contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
+    ) {
+        items(
+            conversations,
+            key = { it.threadId }) { conversation ->
+            ConversationItem(
+                conversation = conversation,
+                isSelected = selectedConversations.contains(conversation.threadId),
+                onClick = { onConversationClick(conversation) },
+                onLongClick = { onConversationLongClick(conversation) }
+            )
+        }
+    }
+}
+
+// ... (Rest of NewConversationScreen and Helper functions remain identical to previous answer)
+
+@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun NewConversationScreen(
+    onBack: () -> Unit,
+    onContactSelected: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val contactPermission = rememberPermissionState(Manifest.permission.READ_CONTACTS)
+
+    var searchQuery by remember { mutableStateOf("") }
+    var allContacts by remember { mutableStateOf<List<ContactItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(contactPermission.status.isGranted) {
+        if (contactPermission.status.isGranted) {
+            isLoading = true
+            allContacts = loadDeviceContacts(context)
+            isLoading = false
+        }
+    }
+
+    val filteredContacts = remember(searchQuery, allContacts) {
+        if (searchQuery.isBlank()) allContacts else {
+            allContacts.filter {
+                it.name.contains(searchQuery, ignoreCase = true) ||
+                        it.phoneNumber.contains(searchQuery)
             }
         },
         floatingActionButton = {
