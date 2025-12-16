@@ -2,7 +2,7 @@
 # Android & Kotlin
 agp = "8.13.2"
 kotlin = "2.2.21"
-ksp = "2.2.21-1.0.30"
+ksp = "2.3.3"
 
 # AndroidX Core
 coreKtx = "1.17.0"
@@ -14,7 +14,7 @@ composeBom = "2025.12.00"
 materialIconsExtended = "1.7.8"
 
 # Navigation
-navigationCompose = "2.8.5"
+navigationCompose = "2.9.6"
 
 # Hilt (Dependency Injection)
 hilt = "2.57.2"
