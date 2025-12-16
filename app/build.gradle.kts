@@ -22,12 +22,6 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
-        
-        // Room schema export
-        ksp {
-            arg("room.schemaLocation", "$projectDir/schemas")
-            arg("room.incremental", "true")
-        }
     }
 
     buildTypes {
@@ -103,15 +97,6 @@ dependencies {
 
     // DataStore Preferences
     implementation(libs.datastore.preferences)
-    
-    // Room Database
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
-    
-    // Paging 3
-    implementation("androidx.paging:paging-runtime-ktx:3.2.1")
-    implementation("androidx.paging:paging-compose:3.2.1")
 
     // Permissions
     implementation(libs.accompanist.permissions)
