@@ -3,6 +3,7 @@ package r.messaging.rexms.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -22,7 +23,8 @@ enum class AppTheme {
 class UserPreferences @Inject constructor(@ApplicationContext private val context: Context) {
     private val THEME_KEY = stringPreferencesKey("app_theme")
     private val ARCHIVED_THREADS_KEY = stringPreferencesKey("archived_threads")
-
+    private val NO_NOTIFICATION_UNKNOWN_KEY = booleanPreferencesKey("no_notification_unknown")
+    private val AUTO_ARCHIVE_UNKNOWN_KEY = booleanPreferencesKey("auto_archive_unknown")
 
     val theme: Flow<AppTheme> = context.dataStore.data.map { preferences ->
         val name = preferences[THEME_KEY] ?: AppTheme.SYSTEM.name
@@ -58,6 +60,27 @@ class UserPreferences @Inject constructor(@ApplicationContext private val contex
                 ?.toSet() ?: emptySet()
 
             preferences[ARCHIVED_THREADS_KEY] = operation(existing).joinToString(",")
+        }
+    }
+
+    // Unknown Contacts preferences
+    val noNotificationForUnknown: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[NO_NOTIFICATION_UNKNOWN_KEY] ?: false
+    }
+
+    val autoArchiveUnknown: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[AUTO_ARCHIVE_UNKNOWN_KEY] ?: false
+    }
+
+    suspend fun setNoNotificationForUnknown(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[NO_NOTIFICATION_UNKNOWN_KEY] = enabled
+        }
+    }
+
+    suspend fun setAutoArchiveUnknown(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[AUTO_ARCHIVE_UNKNOWN_KEY] = enabled
         }
     }
 }
