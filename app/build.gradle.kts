@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "r.messaging.rexms"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "r.messaging.rexms"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -61,22 +61,22 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 
     // Navigation
-    implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation(libs.navigation.compose)
 
     // Hilt for Dependency Injection
-    implementation("com.google.dagger:hilt-android:2.52")
-    ksp("com.google.dagger:hilt-android-compiler:2.52")
-    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+    implementation(libs.dagger.hilt.android)
+    ksp(libs.hilt.android.compiler)
+    implementation(libs.hilt.navigation.compose)
 
     // DataStore Preferences
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation(libs.datastore.preferences)
 
     // Permissions
-    implementation("com.google.accompanist:accompanist-permissions:0.36.0")
+    implementation(libs.google.accompanist.permissions)
 
     // Material Icons Extended
-    implementation("androidx.compose.material:material-icons-extended:1.7.6")
+    implementation(libs.androidx.material.icons.extended)
 
     // Swipe Actions
-    implementation("me.saket.swipe:swipe:1.3.0")
+    implementation(libs.swipe)
 }
