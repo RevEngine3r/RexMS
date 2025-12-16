@@ -105,13 +105,13 @@ dependencies {
     implementation(libs.datastore.preferences)
     
     // Room Database
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
     
     // Paging 3
-    implementation("androidx.paging:paging-runtime-ktx:3.2.1")
-    implementation("androidx.paging:paging-compose:3.2.1")
+    implementation(libs.paging.runtime.ktx)
+    implementation(libs.paging.compose)
 
     // Permissions
     implementation(libs.accompanist.permissions)
