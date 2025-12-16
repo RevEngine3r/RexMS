@@ -47,9 +47,13 @@ fun ConversationListScreen(
 
     // State
     val conversations by viewModel.conversations.collectAsState(initial = emptyList())
+    val deleteError by viewModel.deleteError.collectAsState()
+    val isDeleting by viewModel.isDeleting.collectAsState()
+    
     var query by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
     val selectedConversations = remember { mutableStateListOf<Long>() }
 
     // Logic to check/request Default SMS Role
@@ -92,6 +96,45 @@ fun ConversationListScreen(
         }
     }
 
+    // Delete confirmation dialog
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Conversations?") },
+            text = { Text("This will permanently delete ${selectedConversations.size} conversation(s) and all their messages.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteThreads(selectedConversations.toSet())
+                        selectedConversations.clear()
+                        showDeleteDialog = false
+                    },
+                    enabled = !isDeleting
+                ) {
+                    if (isDeleting) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    } else {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Error snackbar
+    deleteError?.let { error ->
+        LaunchedEffect(error) {
+            // Show error and clear after displaying
+            kotlinx.coroutines.delay(3000)
+            viewModel.clearDeleteError()
+        }
+    }
+
     Scaffold(
         topBar = {
             if (selectedConversations.isNotEmpty()) {
@@ -102,7 +145,7 @@ fun ConversationListScreen(
                         viewModel.archiveThreads(selectedConversations.toSet())
                         selectedConversations.clear()
                     },
-                    onDelete = { /* Implement Delete */ }
+                    onDelete = { showDeleteDialog = true }
                 )
             } else {
                 HomeTopBar(
@@ -120,6 +163,20 @@ fun ConversationListScreen(
         floatingActionButton = {
             FloatingActionButton(onClick = onNavigateToNewConversation) {
                 Icon(Icons.AutoMirrored.Filled.Message, "New Message")
+            }
+        },
+        snackbarHost = {
+            deleteError?.let { error ->
+                Snackbar(
+                    modifier = Modifier.padding(16.dp),
+                    action = {
+                        TextButton(onClick = { viewModel.clearDeleteError() }) {
+                            Text("Dismiss")
+                        }
+                    }
+                ) {
+                    Text(error)
+                }
             }
         }
     ) { padding ->
