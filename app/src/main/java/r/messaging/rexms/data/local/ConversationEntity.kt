@@ -1,10 +1,18 @@
 package r.messaging.rexms.data.local
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import r.messaging.rexms.data.Conversation
 
-@Entity(tableName = "conversations")
+@Entity(
+    tableName = "conversations",
+    indices = [
+        Index(value = ["date"], name = "idx_date"),
+        Index(value = ["address"], name = "idx_address"),
+        Index(value = ["read"], name = "idx_read")
+    ]
+)
 data class ConversationEntity(
     @PrimaryKey
     val threadId: Long,

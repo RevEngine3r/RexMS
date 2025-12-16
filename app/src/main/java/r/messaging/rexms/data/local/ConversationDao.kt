@@ -16,6 +16,18 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations ORDER BY date DESC")
     fun getConversationsPagingSource(): PagingSource<Int, ConversationEntity>
     
+    /**
+     * Optimized query for conversation list views.
+     * Returns only the fields needed for display, reducing memory usage.
+     * Uses index on date for optimal sorting performance.
+     */
+    @Query("""
+        SELECT threadId, address, body, date, read, senderName 
+        FROM conversations 
+        ORDER BY date DESC
+    """)
+    fun getConversationListItems(): PagingSource<Int, ConversationListItem>
+    
     @Query("SELECT * FROM conversations WHERE threadId = :threadId")
     suspend fun getConversation(threadId: Long): ConversationEntity?
     
