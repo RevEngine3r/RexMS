@@ -6,7 +6,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.launch
 import r.messaging.rexms.data.AppTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -24,6 +27,8 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val currentTheme by viewModel.theme.collectAsState(initial = AppTheme.SYSTEM)
+    val noNotificationUnknown by viewModel.noNotificationForUnknown.collectAsState(initial = false)
+    val autoArchiveUnknown by viewModel.autoArchiveUnknown.collectAsState(initial = false)
     val scope = rememberCoroutineScope()
     var showThemeDialog by remember { mutableStateOf(false) }
 
@@ -53,6 +58,25 @@ fun SettingsScreen(
                 title = "Theme",
                 subtitle = getThemeName(currentTheme),
                 onClick = { showThemeDialog = true }
+            )
+
+            // SECTION: UNKNOWN CONTACTS
+            SettingsSectionHeader("Unknown Contacts")
+            
+            SettingsSwitchItem(
+                icon = Icons.Default.NotificationsOff,
+                title = "No Notification",
+                subtitle = "Silence notifications from unknown contacts",
+                checked = noNotificationUnknown,
+                onCheckedChange = { scope.launch { viewModel.setNoNotificationForUnknown(it) } }
+            )
+            
+            SettingsSwitchItem(
+                icon = Icons.Default.Archive,
+                title = "Auto Archive",
+                subtitle = "Automatically archive messages from unknown contacts",
+                checked = autoArchiveUnknown,
+                onCheckedChange = { scope.launch { viewModel.setAutoArchiveUnknown(it) } }
             )
 
             // SECTION: NOTIFICATIONS (Placeholder)
@@ -107,6 +131,28 @@ fun SettingsItem(
         supportingContent = { Text(subtitle) },
         leadingContent = { Icon(icon, contentDescription = null) },
         modifier = Modifier.clickable(onClick = onClick)
+    )
+}
+
+@Composable
+fun SettingsSwitchItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(subtitle) },
+        leadingContent = { Icon(icon, contentDescription = null) },
+        trailingContent = {
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange
+            )
+        },
+        modifier = Modifier.clickable { onCheckedChange(!checked) }
     )
 }
 

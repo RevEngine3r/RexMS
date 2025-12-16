@@ -15,10 +15,24 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val theme: Flow<AppTheme> = userPreferences.theme
+    val noNotificationForUnknown: Flow<Boolean> = userPreferences.noNotificationForUnknown
+    val autoArchiveUnknown: Flow<Boolean> = userPreferences.autoArchiveUnknown
 
     fun setTheme(theme: AppTheme) {
         viewModelScope.launch {
             userPreferences.setTheme(theme)
+        }
+    }
+
+    fun setNoNotificationForUnknown(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferences.setNoNotificationForUnknown(enabled)
+        }
+    }
+
+    fun setAutoArchiveUnknown(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferences.setAutoArchiveUnknown(enabled)
         }
     }
 }
