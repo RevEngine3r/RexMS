@@ -16,6 +16,19 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE threadId = :threadId ORDER BY date ASC")
     fun getMessagesPagingSource(threadId: Long): PagingSource<Int, MessageEntity>
     
+    /**
+     * Optimized query for message list views.
+     * Returns only the fields needed for display, reducing memory usage.
+     * Uses composite index (threadId, date) for optimal performance.
+     */
+    @Query("""
+        SELECT id, body, date, type, read 
+        FROM messages 
+        WHERE threadId = :threadId 
+        ORDER BY date ASC
+    """)
+    fun getMessageListItemsForThread(threadId: Long): PagingSource<Int, MessageListItem>
+    
     @Query("SELECT * FROM messages WHERE id = :id")
     suspend fun getMessage(id: Long): MessageEntity?
     
