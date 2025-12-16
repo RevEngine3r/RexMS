@@ -1,11 +1,14 @@
 package r.messaging.rexms
 
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -44,9 +47,15 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
-
+    val context = LocalContext.current
+    BackHandler(enabled = true, onBack = {
+        if (navController.previousBackStackEntry == null) {
+            (context as? Activity)?.finish()
+        } else {
+            navController.popBackStack()
+        }
+    })
     NavHost(navController = navController, startDestination = "home") {
-
         // 1. Home Screen (List)
         composable("home") {
             ConversationListScreen(
