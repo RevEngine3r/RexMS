@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import r.messaging.rexms.data.local.*
@@ -132,7 +133,7 @@ class SmsRepositoryOptimized @Inject constructor(
     }
 
     private suspend fun observeConversationChanges() = withContext(Dispatchers.IO) {
-        callbackFlow {
+        callbackFlow<Unit> {
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
                     repositoryScope.launch {
@@ -143,11 +144,11 @@ class SmsRepositoryOptimized @Inject constructor(
             }
             contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
             awaitClose { contentResolver.unregisterContentObserver(observer) }
-        }.collect {}
+        }.collectLatest{}
     }
 
     private suspend fun observeMessageChanges(threadId: Long) = withContext(Dispatchers.IO) {
-        callbackFlow {
+        callbackFlow<Unit> {
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
                     repositoryScope.launch {
@@ -158,7 +159,7 @@ class SmsRepositoryOptimized @Inject constructor(
             }
             contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
             awaitClose { contentResolver.unregisterContentObserver(observer) }
-        }.collect {}
+        }.collectLatest{}
     }
 
     /**
