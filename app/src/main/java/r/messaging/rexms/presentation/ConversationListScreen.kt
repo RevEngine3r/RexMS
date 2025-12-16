@@ -47,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import r.messaging.rexms.data.ContactItem
+import r.messaging.rexms.data.Conversation
 import r.messaging.rexms.presentation.components.ConversationItem
 import kotlin.collections.filter
 
@@ -149,9 +150,12 @@ fun ConversationListScreen(
             Scaffold(
                 topBar = {
                     if (selectedConversations.isNotEmpty()) {
-                        val selectedConversationObjects = conversations.filter { it.threadId in selectedConversations }
-                        val selectionContainsUnarchived = selectedConversationObjects.any { !it.archived }
-                        val selectionContainsArchived = selectedConversationObjects.any { it.archived }
+                        val selectedConversationObjects =
+                            conversations.filter { it.threadId in selectedConversations }
+                        val selectionContainsUnarchived =
+                            selectedConversationObjects.any { !it.archived }
+                        val selectionContainsArchived =
+                            selectedConversationObjects.any { it.archived }
 
                         TopAppBar(
                             title = { Text("${selectedConversations.size} selected") },
@@ -369,7 +373,7 @@ fun ConversationListScreen(
                                         Text("Archived (${archived.count { !it.read }})")
                                     }
                                 }
-                                val onConversationClick = { conversation: r.messaging.rexms.data.Conversation ->
+                                val onConversationClick = { conversation: Conversation ->
                                     if (selectedConversations.isNotEmpty()) {
                                         if (selectedConversations.contains(conversation.threadId)) {
                                             selectedConversations.remove(conversation.threadId)
@@ -382,8 +386,9 @@ fun ConversationListScreen(
                                             conversation.address
                                         )
                                     }
+                                    Unit
                                 }
-                                val onConversationLongClick = { conversation: r.messaging.rexms.data.Conversation ->
+                                val onConversationLongClick = { conversation: Conversation ->
                                     if (!selectedConversations.contains(conversation.threadId)) {
                                         selectedConversations.add(conversation.threadId)
                                     }
@@ -419,10 +424,10 @@ fun ConversationListScreen(
 
 @Composable
 fun ConversationList(
-    conversations: List<r.messaging.rexms.data.Conversation>,
+    conversations: List<Conversation>,
     selectedConversations: List<Long>,
-    onConversationClick: (r.messaging.rexms.data.Conversation) -> Unit,
-    onConversationLongClick: (r.messaging.rexms.data.Conversation) -> Unit
+    onConversationClick: (Conversation) -> Unit,
+    onConversationLongClick: (Conversation) -> Unit
 ) {
     LazyColumn(
         contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
