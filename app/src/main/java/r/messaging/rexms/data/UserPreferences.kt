@@ -25,6 +25,9 @@ class UserPreferences @Inject constructor(@ApplicationContext private val contex
     private val ARCHIVED_THREADS_KEY = stringPreferencesKey("archived_threads")
     private val NO_NOTIFICATION_UNKNOWN_KEY = booleanPreferencesKey("no_notification_unknown")
     private val AUTO_ARCHIVE_UNKNOWN_KEY = booleanPreferencesKey("auto_archive_unknown")
+    private val PINNED_THREADS_KEY = stringPreferencesKey("pinned_threads")
+    private val MUTED_THREADS_KEY = stringPreferencesKey("muted_threads")
+    private val BLOCKED_NUMBERS_KEY = stringPreferencesKey("blocked_numbers")
 
     val theme: Flow<AppTheme> = context.dataStore.data.map { preferences ->
         val name = preferences[THEME_KEY] ?: AppTheme.SYSTEM.name
@@ -35,6 +38,7 @@ class UserPreferences @Inject constructor(@ApplicationContext private val contex
         context.dataStore.edit { it[THEME_KEY] = theme.name }
     }
 
+    // Archived Threads
     val archivedThreads: Flow<Set<Long>> = context.dataStore.data.map { preferences ->
         preferences[ARCHIVED_THREADS_KEY]
             ?.split(',')
@@ -60,6 +64,103 @@ class UserPreferences @Inject constructor(@ApplicationContext private val contex
                 ?.toSet() ?: emptySet()
 
             preferences[ARCHIVED_THREADS_KEY] = operation(existing).joinToString(",")
+        }
+    }
+
+    // Pinned Threads
+    val pinnedThreads: Flow<Set<Long>> = context.dataStore.data.map { preferences ->
+        preferences[PINNED_THREADS_KEY]
+            ?.split(',')
+            ?.filter { it.isNotEmpty() }
+            ?.mapNotNull { it.toLongOrNull() }
+            ?.toSet() ?: emptySet()
+    }
+
+    suspend fun pinThread(threadId: Long) {
+        editPinnedThreads { it + threadId }
+    }
+
+    suspend fun unpinThread(threadId: Long) {
+        editPinnedThreads { it - threadId }
+    }
+
+    private suspend fun editPinnedThreads(operation: (Set<Long>) -> Set<Long>) {
+        context.dataStore.edit { preferences ->
+            val existing = preferences[PINNED_THREADS_KEY]
+                ?.split(',')
+                ?.filter { it.isNotEmpty() }
+                ?.mapNotNull { it.toLongOrNull() }
+                ?.toSet() ?: emptySet()
+
+            preferences[PINNED_THREADS_KEY] = operation(existing).joinToString(",")
+        }
+    }
+
+    // Muted Threads
+    val mutedThreads: Flow<Set<Long>> = context.dataStore.data.map { preferences ->
+        preferences[MUTED_THREADS_KEY]
+            ?.split(',')
+            ?.filter { it.isNotEmpty() }
+            ?.mapNotNull { it.toLongOrNull() }
+            ?.toSet() ?: emptySet()
+    }
+
+    suspend fun muteThread(threadId: Long) {
+        editMutedThreads { it + threadId }
+    }
+
+    suspend fun unmuteThread(threadId: Long) {
+        editMutedThreads { it - threadId }
+    }
+
+    private suspend fun editMutedThreads(operation: (Set<Long>) -> Set<Long>) {
+        context.dataStore.edit { preferences ->
+            val existing = preferences[MUTED_THREADS_KEY]
+                ?.split(',')
+                ?.filter { it.isNotEmpty() }
+                ?.mapNotNull { it.toLongOrNull() }
+                ?.toSet() ?: emptySet()
+
+            preferences[MUTED_THREADS_KEY] = operation(existing).joinToString(",")
+        }
+    }
+
+    // Blocked Numbers
+    val blockedNumbers: Flow<Set<String>> = context.dataStore.data.map { preferences ->
+        preferences[BLOCKED_NUMBERS_KEY]
+            ?.split(',')
+            ?.filter { it.isNotEmpty() }
+            ?.toSet() ?: emptySet()
+    }
+
+    suspend fun blockNumber(number: String) {
+        editBlockedNumbers { it + number }
+    }
+
+    suspend fun unblockNumber(number: String) {
+        editBlockedNumbers { it - number }
+    }
+
+    suspend fun isNumberBlocked(number: String): Boolean {
+        var isBlocked = false
+        context.dataStore.data.collect { preferences ->
+            val blocked = preferences[BLOCKED_NUMBERS_KEY]
+                ?.split(',')
+                ?.filter { it.isNotEmpty() }
+                ?.toSet() ?: emptySet()
+            isBlocked = blocked.contains(number)
+        }
+        return isBlocked
+    }
+
+    private suspend fun editBlockedNumbers(operation: (Set<String>) -> Set<String>) {
+        context.dataStore.edit { preferences ->
+            val existing = preferences[BLOCKED_NUMBERS_KEY]
+                ?.split(',')
+                ?.filter { it.isNotEmpty() }
+                ?.toSet() ?: emptySet()
+
+            preferences[BLOCKED_NUMBERS_KEY] = operation(existing).joinToString(",")
         }
     }
 
