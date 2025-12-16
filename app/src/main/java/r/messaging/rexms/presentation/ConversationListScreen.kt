@@ -110,6 +110,7 @@ fun ConversationListScreen(
                     onQueryChange = { query = it },
                     isSearchActive = isSearchActive,
                     onSearchActiveChange = { isSearchActive = it },
+                    showMenu = showMenu,
                     onMenuClick = { showMenu = true },
                     onSettingsClick = { showMenu = false; onNavigateToSettings() },
                     onDismissMenu = { showMenu = false }
@@ -208,6 +209,7 @@ fun HomeTopBar(
     onQueryChange: (String) -> Unit,
     isSearchActive: Boolean,
     onSearchActiveChange: (Boolean) -> Unit,
+    showMenu: Boolean,
     onMenuClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onDismissMenu: () -> Unit
@@ -246,7 +248,7 @@ fun HomeTopBar(
                     IconButton(onClick = onMenuClick) {
                         Icon(Icons.Default.MoreVert, "Menu")
                     }
-                    DropdownMenu(expanded = onMenuClick == {}, onDismissRequest = onDismissMenu) {
+                    DropdownMenu(expanded = showMenu, onDismissRequest = onDismissMenu) {
                         DropdownMenuItem(text = { Text("Settings") }, onClick = onSettingsClick)
                     }
                 }
