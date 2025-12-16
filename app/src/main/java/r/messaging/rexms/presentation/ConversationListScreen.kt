@@ -120,10 +120,11 @@ fun ConversationListScreen(
     val (archived, unarchived) = filteredConversations.partition { it.archived }
     var showArchived by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = active || showNewMessageScreen || selectedConversations.isNotEmpty()) {
+    BackHandler(enabled = active || showNewMessageScreen || selectedConversations.isNotEmpty() || showArchived) {
         when {
             selectedConversations.isNotEmpty() -> selectedConversations.clear()
             showNewMessageScreen -> showNewMessageScreen = false
+            showArchived -> showArchived = false
             active -> active = false
         }
     }
