@@ -27,13 +27,25 @@ fun ChatScreen(
     onBack: () -> Unit,
     viewModel: ChatViewModel = hiltViewModel()
 ) {
-    val messages by viewModel.messages.collectAsState()
+    val messages by viewModel.messages.collectAsState(initial = emptyList())
+    val sendError by viewModel.sendError.collectAsState()
+    val isSending by viewModel.isSending.collectAsState()
+    
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
+    // Auto-scroll to bottom when new messages arrive
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    // Show error temporarily
+    sendError?.let { error ->
+        LaunchedEffect(error) {
+            kotlinx.coroutines.delay(3000)
+            viewModel.clearSendError()
         }
     }
 
@@ -46,19 +58,31 @@ fun ChatScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                // Standard Material 3 Colors (No custom dark override)
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
                     navigationIconContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
+        },
+        snackbarHost = {
+            sendError?.let { error ->
+                Snackbar(
+                    modifier = Modifier.padding(16.dp),
+                    action = {
+                        TextButton(onClick = { viewModel.clearSendError() }) {
+                            Text("Dismiss")
+                        }
+                    }
+                ) {
+                    Text(error)
+                }
+            }
         }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                // Standard Background
                 .background(MaterialTheme.colorScheme.background)
                 .padding(padding)
         ) {
@@ -68,14 +92,14 @@ fun ChatScreen(
                     .weight(1f)
                     .fillMaxWidth(),
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp) // Tighter spacing like G-Messages
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 items(messages, key = { it.id }) { message ->
                     MessageBubble(message)
                 }
             }
 
-            // Input Area (Surface Container High)
+            // Input Area
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 tonalElevation = 2.dp
@@ -91,33 +115,43 @@ fun ChatScreen(
                         onValueChange = { inputText = it },
                         modifier = Modifier.weight(1f),
                         placeholder = { Text("Text message") },
-                        shape = RoundedCornerShape(24.dp), // Pill shape input
+                        shape = RoundedCornerShape(24.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surface,
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                             focusedBorderColor = Color.Transparent,
                             unfocusedBorderColor = Color.Transparent
                         ),
-                        maxLines = 4
+                        maxLines = 4,
+                        enabled = !isSending
                     )
 
                     Spacer(modifier = Modifier.width(8.dp))
 
                     IconButton(
                         onClick = {
-                            viewModel.sendMessage(inputText)
-                            inputText = ""
+                            if (inputText.isNotBlank()) {
+                                viewModel.sendMessage(inputText)
+                                inputText = ""
+                            }
                         },
-                        // Only enable if text exists
-                        enabled = inputText.isNotBlank()
+                        enabled = inputText.isNotBlank() && !isSending
                     ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            "Send",
-                            tint = if (inputText.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                                alpha = 0.4f
+                        if (isSending) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
                             )
-                        )
+                        } else {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                "Send",
+                                tint = if (inputText.isNotBlank()) 
+                                    MaterialTheme.colorScheme.primary 
+                                else 
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            )
+                        }
                     }
                 }
             }
@@ -130,9 +164,6 @@ fun MessageBubble(message: Message) {
     val isMe = message.isMe()
     val align = if (isMe) Alignment.End else Alignment.Start
 
-    // Material 3 Message Colors
-    // Sent: Primary (Filled)
-    // Received: SecondaryContainer (Light Grey/Blue)
     val containerColor = if (isMe) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -168,7 +199,6 @@ fun MessageBubble(message: Message) {
             )
         }
 
-        // Date Timestamp
         Text(
             text = formatMessageDate(message.date),
             style = MaterialTheme.typography.labelSmall,
