@@ -5,21 +5,26 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import r.messaging.rexms.data.Message
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,9 +35,27 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsState(initial = emptyList())
     val sendError by viewModel.sendError.collectAsState()
     val isSending by viewModel.isSending.collectAsState()
+    val contactName by viewModel.contactName.collectAsState()
+    val phoneNumber by viewModel.phoneNumber.collectAsState()
     
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+    // Display name: use contact name if available, otherwise phone number
+    val displayName = contactName ?: phoneNumber
+    val displaySubtitle = if (contactName != null) phoneNumber else null
+
+    // Avatar color based on phone number
+    val avatarColor = remember(phoneNumber) {
+        val colors = listOf(
+            Color(0xFFE53935), Color(0xFFD81B60), Color(0xFF8E24AA),
+            Color(0xFF5E35B1), Color(0xFF3949AB), Color(0xFF1E88E5),
+            Color(0xFF039BE5), Color(0xFF00ACC1), Color(0xFF00897B),
+            Color(0xFF43A047), Color(0xFF7CB342), Color(0xFFC0CA33),
+            Color(0xFFFFB300), Color(0xFFFF6F00), Color(0xFFE64A19)
+        )
+        colors[abs(phoneNumber.hashCode()) % colors.size]
+    }
 
     // Auto-scroll to bottom when new messages arrive
     LaunchedEffect(messages.size) {
@@ -52,10 +75,59 @@ fun ChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Chat") },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        // Avatar
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(avatarColor),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = displayName.take(1).uppercase(),
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        // Name and subtitle
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = displayName,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (displaySubtitle != null) {
+                                Text(
+                                    text = displaySubtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { /* TODO: Show options menu */ }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More options")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

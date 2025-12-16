@@ -8,13 +8,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import r.messaging.rexms.data.ContactChecker
 import r.messaging.rexms.data.SmsRepository
 import javax.inject.Inject
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val repository: SmsRepository
+    private val repository: SmsRepository,
+    private val contactChecker: ContactChecker
 ) : ViewModel() {
 
     private val threadId: Long = savedStateHandle["threadId"] ?: 0L
@@ -28,9 +30,25 @@ class ChatViewModel @Inject constructor(
     private val _isSending = MutableStateFlow(false)
     val isSending: StateFlow<Boolean> = _isSending.asStateFlow()
 
+    private val _contactName = MutableStateFlow<String?>(null)
+    val contactName: StateFlow<String?> = _contactName.asStateFlow()
+
+    private val _phoneNumber = MutableStateFlow(address)
+    val phoneNumber: StateFlow<String> = _phoneNumber.asStateFlow()
+
     init {
         // Mark thread as read when opening chat
         markAsRead()
+        
+        // Load contact name
+        loadContactInfo()
+    }
+
+    private fun loadContactInfo() {
+        viewModelScope.launch {
+            val name = contactChecker.getContactName(address)
+            _contactName.value = name
+        }
     }
 
     fun sendMessage(text: String) {
