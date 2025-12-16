@@ -58,8 +58,38 @@ class SmsRepository @Inject constructor(
             awaitClose { contentResolver.unregisterContentObserver(observer) }
         }.flowOn(Dispatchers.IO)
 
-        return conversationsFlow.combine(userPreferences.archivedThreads) { conversations, archivedIds ->
+        return conversationsFlow.combine(
+            userPreferences.archivedThreads
+        ) { conversations, archivedIds ->
             conversations.map { it.copy(archived = it.threadId in archivedIds) }
+        }.combine(
+            userPreferences.autoArchiveUnknown
+        ) { conversations, autoArchiveEnabled ->
+            if (autoArchiveEnabled) {
+                // Auto-archive unknown contacts
+                val unknownThreadIds = conversations
+                    .filter { contactChecker.isUnknownContact(it.address) && !it.archived }
+                    .map { it.threadId }
+                    .toSet()
+                
+                if (unknownThreadIds.isNotEmpty()) {
+                    // Archive them in the background
+                    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                        userPreferences.archiveThreads(unknownThreadIds)
+                    }
+                }
+                
+                // Mark them as archived in the returned list
+                conversations.map { conversation ->
+                    if (contactChecker.isUnknownContact(conversation.address)) {
+                        conversation.copy(archived = true)
+                    } else {
+                        conversation
+                    }
+                }
+            } else {
+                conversations
+            }
         }
     }
 
