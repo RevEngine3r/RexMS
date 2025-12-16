@@ -19,9 +19,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import r.messaging.rexms.data.Message
+import r.messaging.rexms.presentation.components.MenuDivider
+import r.messaging.rexms.presentation.components.ModernMenuItem
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
@@ -46,11 +49,9 @@ fun ChatScreen(
     var showMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    // Display name: use contact name if available, otherwise phone number
     val displayName = contactName ?: phoneNumber
     val displaySubtitle = if (contactName != null) phoneNumber else null
 
-    // Avatar color based on phone number
     val avatarColor = remember(phoneNumber) {
         val colors = listOf(
             Color(0xFFE53935), Color(0xFFD81B60), Color(0xFF8E24AA),
@@ -62,14 +63,12 @@ fun ChatScreen(
         colors[abs(phoneNumber.hashCode()) % colors.size]
     }
 
-    // Auto-scroll to bottom when new messages arrive
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
     }
 
-    // Show error temporarily
     sendError?.let { error ->
         LaunchedEffect(error) {
             kotlinx.coroutines.delay(3000)
@@ -85,7 +84,6 @@ fun ChatScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        // Avatar
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
@@ -103,10 +101,7 @@ fun ChatScreen(
 
                         Spacer(modifier = Modifier.width(12.dp))
 
-                        // Name and subtitle
-                        Column(
-                            modifier = Modifier.weight(1f)
-                        ) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = displayName,
                                 style = MaterialTheme.typography.titleMedium,
@@ -137,79 +132,42 @@ fun ChatScreen(
                         }
                         DropdownMenu(
                             expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
+                            onDismissRequest = { showMenu = false },
+                            offset = DpOffset(x = (-8).dp, y = 0.dp)
                         ) {
-                            DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            if (isPinned) Icons.Default.PushPin else Icons.Default.PushPin,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(if (isPinned) "Unpin" else "Pin")
-                                    }
-                                },
+                            ModernMenuItem(
+                                text = if (isPinned) "Unpin" else "Pin",
+                                icon = Icons.Default.PushPin,
                                 onClick = {
                                     viewModel.togglePin()
                                     showMenu = false
                                 }
                             )
                             
-                            DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            if (isMuted) Icons.Default.Notifications else Icons.Default.NotificationsOff,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(if (isMuted) "Unmute" else "Mute")
-                                    }
-                                },
+                            ModernMenuItem(
+                                text = if (isMuted) "Unmute" else "Mute",
+                                icon = if (isMuted) Icons.Default.Notifications else Icons.Default.NotificationsOff,
                                 onClick = {
                                     viewModel.toggleMute()
                                     showMenu = false
                                 }
                             )
                             
-                            DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            if (isBlocked) Icons.Default.PersonOff else Icons.Default.Block,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            if (isBlocked) "Unblock" else "Block",
-                                            color = if (!isBlocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                },
+                            ModernMenuItem(
+                                text = if (isBlocked) "Unblock" else "Block",
+                                icon = if (isBlocked) Icons.Default.Person else Icons.Default.Block,
                                 onClick = {
                                     viewModel.toggleBlock()
                                     showMenu = false
-                                }
+                                },
+                                isDestructive = !isBlocked
                             )
                             
-                            HorizontalDivider()
+                            MenuDivider()
                             
-                            DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Default.Archive,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(if (isArchived) "Unarchive" else "Archive")
-                                    }
-                                },
+                            ModernMenuItem(
+                                text = if (isArchived) "Unarchive" else "Archive",
+                                icon = Icons.Default.Archive,
                                 onClick = {
                                     viewModel.toggleArchive()
                                     showMenu = false
@@ -259,7 +217,6 @@ fun ChatScreen(
                 }
             }
 
-            // Input Area
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 tonalElevation = 2.dp
