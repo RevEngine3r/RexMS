@@ -13,10 +13,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.ExperimentalMaterialApi
-import androidx.compose.material.pullrefresh.PullRefreshIndicator
-import androidx.compose.material.pullrefresh.pullRefresh
-import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Message
@@ -26,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
@@ -45,7 +45,7 @@ import r.messaging.rexms.presentation.components.MenuDivider
 import r.messaging.rexms.presentation.components.ModernMenuItem
 import r.messaging.rexms.presentation.components.SwipeableConversationItem
 
-@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
+@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationListScreen(
     onNavigateToChat: (Long, String) -> Unit,
@@ -70,18 +70,27 @@ fun ConversationListScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     val selectedConversations = remember { mutableStateListOf<Long>() }
     
-    // Pull to refresh state
+    // Pull to refresh state - Material3 version
     var isRefreshing by remember { mutableStateOf(false) }
-    val pullRefreshState = rememberPullRefreshState(
-        refreshing = isRefreshing,
-        onRefresh = {
-            scope.launch {
-                isRefreshing = true
-                delay(1000) // Simulate refresh - data auto-updates via Flow
-                isRefreshing = false
-            }
+    val pullToRefreshState = rememberPullToRefreshState()
+    
+    // Handle refresh trigger from pull gesture
+    LaunchedEffect(pullToRefreshState.isRefreshing) {
+        if (pullToRefreshState.isRefreshing) {
+            isRefreshing = true
+            delay(1000) // Simulate refresh - data auto-updates via Flow
+            isRefreshing = false
         }
-    )
+    }
+    
+    // Sync refresh state with pull-to-refresh state
+    LaunchedEffect(isRefreshing) {
+        if (isRefreshing) {
+            pullToRefreshState.startRefresh()
+        } else {
+            pullToRefreshState.endRefresh()
+        }
+    }
 
     // Logic to check/request Default SMS Role
     var isDefaultApp by remember { mutableStateOf(true) }
@@ -218,7 +227,7 @@ fun ConversationListScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pullRefresh(pullRefreshState)
+                    .nestedScroll(pullToRefreshState.nestedScrollConnection)
             ) {
                 LazyColumn(
                     contentPadding = padding,
@@ -277,11 +286,9 @@ fun ConversationListScreen(
                     }
                 }
 
-                PullRefreshIndicator(
-                    refreshing = isRefreshing,
-                    state = pullRefreshState,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                    contentColor = MaterialTheme.colorScheme.primary
+                PullToRefreshContainer(
+                    state = pullToRefreshState,
+                    modifier = Modifier.align(Alignment.TopCenter)
                 )
             }
         }
