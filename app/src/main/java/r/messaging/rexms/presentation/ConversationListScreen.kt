@@ -8,14 +8,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Message
@@ -24,8 +22,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
@@ -39,11 +35,8 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import r.messaging.rexms.data.Conversation
-import r.messaging.rexms.presentation.components.ConversationItem
-import r.messaging.rexms.presentation.components.MenuDivider
-import r.messaging.rexms.presentation.components.ModernMenuItem
 import r.messaging.rexms.presentation.components.SwipeableConversationItem
+import r.messaging.rexms.presentation.components.ModernMenuItem
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -63,34 +56,14 @@ fun ConversationListScreen(
     val conversations by viewModel.conversations.collectAsState(initial = emptyList())
     val deleteError by viewModel.deleteError.collectAsState()
     val isDeleting by viewModel.isDeleting.collectAsState()
-    
     var query by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     val selectedConversations = remember { mutableStateListOf<Long>() }
-    
+
     // Pull to refresh state - Material3 version
     var isRefreshing by remember { mutableStateOf(false) }
-    val pullToRefreshState = rememberPullToRefreshState()
-    
-    // Handle refresh trigger from pull gesture
-    LaunchedEffect(pullToRefreshState.isRefreshing) {
-        if (pullToRefreshState.isRefreshing) {
-            isRefreshing = true
-            delay(1000) // Simulate refresh - data auto-updates via Flow
-            isRefreshing = false
-        }
-    }
-    
-    // Sync refresh state with pull-to-refresh state
-    LaunchedEffect(isRefreshing) {
-        if (isRefreshing) {
-            pullToRefreshState.startRefresh()
-        } else {
-            pullToRefreshState.endRefresh()
-        }
-    }
 
     // Logic to check/request Default SMS Role
     var isDefaultApp by remember { mutableStateOf(true) }
@@ -224,10 +197,16 @@ fun ConversationListScreen(
                 }
             }
         } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .nestedScroll(pullToRefreshState.nestedScrollConnection)
+            PullToRefreshBox(
+                modifier = Modifier.fillMaxSize(),
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    isRefreshing = true
+                    scope.launch {
+                        delay(1000) // Simulate refresh - data auto-updates via Flow
+                        isRefreshing = false
+                    }
+                }
             ) {
                 LazyColumn(
                     contentPadding = padding,
@@ -239,6 +218,8 @@ fun ConversationListScreen(
                                 count = archived.size,
                                 onClick = onNavigateToArchived
                             )
+                        }
+                        item {
                             HorizontalDivider(
                                 thickness = 0.5.dp,
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -285,11 +266,6 @@ fun ConversationListScreen(
                         )
                     }
                 }
-
-                PullToRefreshContainer(
-                    state = pullToRefreshState,
-                    modifier = Modifier.align(Alignment.TopCenter)
-                )
             }
         }
     }

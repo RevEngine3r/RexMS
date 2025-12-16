@@ -1,17 +1,18 @@
 package r.messaging.rexms.data
 
+import android.Manifest
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.database.ContentObserver
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.ContactsContract
 import android.provider.Telephony
 import android.telephony.SmsManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -30,11 +31,26 @@ class SmsRepository @Inject constructor(
 ) {
     private val contentResolver: ContentResolver = context.contentResolver
 
+    private fun hasReadSmsPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
     fun getConversations(): Flow<List<Conversation>> {
         val conversationsFlow = callbackFlow {
+            if (!hasReadSmsPermission()) {
+                trySend(emptyList())
+                awaitClose { }
+                return@callbackFlow
+            }
+
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
-                    trySend(fetchConversations())
+                    if (hasReadSmsPermission()) {
+                        trySend(fetchConversations())
+                    }
                 }
             }
             contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
@@ -48,9 +64,17 @@ class SmsRepository @Inject constructor(
     }
 
     fun getMessagesForThread(threadId: Long): Flow<List<Message>> = callbackFlow {
+        if (!hasReadSmsPermission()) {
+            trySend(emptyList())
+            awaitClose { }
+            return@callbackFlow
+        }
+
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
-                trySend(fetchMessages(threadId))
+                if (hasReadSmsPermission()) {
+                    trySend(fetchMessages(threadId))
+                }
             }
         }
         contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
@@ -59,95 +83,120 @@ class SmsRepository @Inject constructor(
     }.flowOn(Dispatchers.IO)
 
     private fun fetchConversations(): List<Conversation> {
+        if (!hasReadSmsPermission()) return emptyList()
+
         val conversations = mutableListOf<Conversation>()
         val projection = arrayOf(
             Telephony.Sms.Conversations.THREAD_ID,
             Telephony.Sms.Conversations.SNIPPET
         )
-        val cursor = contentResolver.query(
-            Telephony.Sms.Conversations.CONTENT_URI,
-            projection, null, null,
-            Telephony.Sms.Conversations.DEFAULT_SORT_ORDER
-        )
 
-        cursor?.use {
-            val threadIdIdx = it.getColumnIndex(Telephony.Sms.Conversations.THREAD_ID)
-            val snippetIdx = it.getColumnIndex(Telephony.Sms.Conversations.SNIPPET)
+        try {
+            val cursor = contentResolver.query(
+                Telephony.Sms.Conversations.CONTENT_URI,
+                projection, null, null,
+                Telephony.Sms.Conversations.DEFAULT_SORT_ORDER
+            )
 
-            while (it.moveToNext()) {
-                val threadId = it.getLong(threadIdIdx)
-                if (threadId <= 0) continue
+            cursor?.use {
+                val threadIdIdx = it.getColumnIndex(Telephony.Sms.Conversations.THREAD_ID)
+                val snippetIdx = it.getColumnIndex(Telephony.Sms.Conversations.SNIPPET)
 
-                val details = getLastMessageDetails(threadId)
-                val contactName = contactChecker.getContactName(details.address)
-                
-                conversations.add(
-                    Conversation(
-                        threadId = threadId,
-                        address = details.address,
-                        body = it.getString(snippetIdx) ?: "",
-                        date = details.date,
-                        read = details.read,
-                        senderName = contactName
+                while (it.moveToNext()) {
+                    val threadId = it.getLong(threadIdIdx)
+                    if (threadId <= 0) continue
+
+                    val details = getLastMessageDetails(threadId)
+                    val contactName = contactChecker.getContactName(details.address)
+
+                    conversations.add(
+                        Conversation(
+                            threadId = threadId,
+                            address = details.address,
+                            body = it.getString(snippetIdx) ?: "",
+                            date = details.date,
+                            read = details.read,
+                            senderName = contactName
+                        )
                     )
-                )
+                }
             }
+        } catch (e: SecurityException) {
+            Log.e("SmsRepo", "Permission denied while fetching conversations", e)
         }
+
         return conversations
     }
 
     private fun getLastMessageDetails(threadId: Long): MessageDetails {
+        if (!hasReadSmsPermission()) {
+            return MessageDetails("Unknown", System.currentTimeMillis(), true)
+        }
+
         val uri = Telephony.Sms.CONTENT_URI
         val projection = arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.DATE, Telephony.Sms.READ)
         var details = MessageDetails("Unknown", System.currentTimeMillis(), true)
 
-        contentResolver.query(
-            uri, projection, "${Telephony.Sms.THREAD_ID} = ?",
-            arrayOf(threadId.toString()), "date DESC LIMIT 1"
-        )?.use {
-            if (it.moveToFirst()) {
-                details = MessageDetails(
-                    it.getString(0) ?: "Unknown",
-                    it.getLong(1),
-                    it.getInt(2) == 1
-                )
+        try {
+            contentResolver.query(
+                uri, projection, "${Telephony.Sms.THREAD_ID} = ?",
+                arrayOf(threadId.toString()), "date DESC LIMIT 1"
+            )?.use {
+                if (it.moveToFirst()) {
+                    details = MessageDetails(
+                        it.getString(0) ?: "Unknown",
+                        it.getLong(1),
+                        it.getInt(2) == 1
+                    )
+                }
             }
+        } catch (e: SecurityException) {
+            Log.e("SmsRepo", "Permission denied while fetching message details", e)
         }
+
         return details
     }
 
     data class MessageDetails(val address: String, val date: Long, val read: Boolean)
 
     private fun fetchMessages(threadId: Long): List<Message> {
+        if (!hasReadSmsPermission()) return emptyList()
+
         val messages = mutableListOf<Message>()
         val uri = Telephony.Sms.CONTENT_URI
-        contentResolver.query(
-            uri, null, "${Telephony.Sms.THREAD_ID} = ?",
-            arrayOf(threadId.toString()), "date ASC"
-        )?.use {
-            val idIdx = it.getColumnIndex(Telephony.Sms._ID)
-            val addressIdx = it.getColumnIndex(Telephony.Sms.ADDRESS)
-            val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
-            val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
-            val typeIdx = it.getColumnIndex(Telephony.Sms.TYPE)
-            val readIdx = it.getColumnIndex(Telephony.Sms.READ)
-            val subIdIdx = it.getColumnIndex(Telephony.Sms.SUBSCRIPTION_ID)
 
-            while (it.moveToNext()) {
-                messages.add(
-                    Message(
-                        id = it.getLong(idIdx),
-                        threadId = threadId,
-                        address = it.getString(addressIdx) ?: "",
-                        body = it.getString(bodyIdx) ?: "",
-                        date = it.getLong(dateIdx),
-                        read = it.getInt(readIdx) == 1,
-                        type = it.getInt(typeIdx),
-                        subId = if (subIdIdx != -1) it.getInt(subIdIdx) else -1
+        try {
+            contentResolver.query(
+                uri, null, "${Telephony.Sms.THREAD_ID} = ?",
+                arrayOf(threadId.toString()), "date ASC"
+            )?.use {
+                val idIdx = it.getColumnIndex(Telephony.Sms._ID)
+                val addressIdx = it.getColumnIndex(Telephony.Sms.ADDRESS)
+                val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
+                val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
+                val typeIdx = it.getColumnIndex(Telephony.Sms.TYPE)
+                val readIdx = it.getColumnIndex(Telephony.Sms.READ)
+                val subIdIdx = it.getColumnIndex(Telephony.Sms.SUBSCRIPTION_ID)
+
+                while (it.moveToNext()) {
+                    messages.add(
+                        Message(
+                            id = it.getLong(idIdx),
+                            threadId = threadId,
+                            address = it.getString(addressIdx) ?: "",
+                            body = it.getString(bodyIdx) ?: "",
+                            date = it.getLong(dateIdx),
+                            read = it.getInt(readIdx) == 1,
+                            type = it.getInt(typeIdx),
+                            subId = if (subIdIdx != -1) it.getInt(subIdIdx) else -1
+                        )
                     )
-                )
+                }
             }
+        } catch (e: SecurityException) {
+            Log.e("SmsRepo", "Permission denied while fetching messages", e)
         }
+
         return messages
     }
 
@@ -163,6 +212,10 @@ class SmsRepository @Inject constructor(
      * Delete conversations by thread IDs
      */
     fun deleteThreads(threadIds: Set<Long>): Result<Unit> {
+        if (!hasReadSmsPermission()) {
+            return Result.failure(SecurityException("READ_SMS permission not granted"))
+        }
+
         return try {
             threadIds.forEach { threadId ->
                 val deletedCount = contentResolver.delete(
@@ -183,6 +236,10 @@ class SmsRepository @Inject constructor(
      * Delete specific messages by IDs
      */
     fun deleteMessages(messageIds: Set<Long>): Result<Unit> {
+        if (!hasReadSmsPermission()) {
+            return Result.failure(SecurityException("READ_SMS permission not granted"))
+        }
+
         return try {
             messageIds.forEach { messageId ->
                 contentResolver.delete(
@@ -202,6 +259,10 @@ class SmsRepository @Inject constructor(
      * Mark messages as read
      */
     fun markThreadAsRead(threadId: Long): Result<Unit> {
+        if (!hasReadSmsPermission()) {
+            return Result.failure(SecurityException("READ_SMS permission not granted"))
+        }
+
         return try {
             val values = ContentValues().apply {
                 put(Telephony.Sms.READ, 1)
@@ -239,7 +300,6 @@ class SmsRepository @Inject constructor(
                 put(Telephony.Sms.READ, 1)
             }
             context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
-
         } catch (e: Exception) {
             Log.e("SmsRepo", "Failed to send SMS to $destinationAddress", e)
             throw e
