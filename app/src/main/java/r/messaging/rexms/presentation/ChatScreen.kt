@@ -10,7 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,8 +37,13 @@ fun ChatScreen(
     val isSending by viewModel.isSending.collectAsState()
     val contactName by viewModel.contactName.collectAsState()
     val phoneNumber by viewModel.phoneNumber.collectAsState()
+    val isPinned by viewModel.isPinned.collectAsState()
+    val isMuted by viewModel.isMuted.collectAsState()
+    val isBlocked by viewModel.isBlocked.collectAsState()
+    val isArchived by viewModel.isArchived.collectAsState()
     
     var inputText by remember { mutableStateOf("") }
+    var showMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     // Display name: use contact name if available, otherwise phone number
@@ -126,8 +131,91 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { /* TODO: Show options menu */ }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            if (isPinned) Icons.Default.PushPin else Icons.Default.PushPin,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(if (isPinned) "Unpin" else "Pin")
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.togglePin()
+                                    showMenu = false
+                                }
+                            )
+                            
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            if (isMuted) Icons.Default.Notifications else Icons.Default.NotificationsOff,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(if (isMuted) "Unmute" else "Mute")
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.toggleMute()
+                                    showMenu = false
+                                }
+                            )
+                            
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            if (isBlocked) Icons.Default.PersonOff else Icons.Default.Block,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            if (isBlocked) "Unblock" else "Block",
+                                            color = if (!isBlocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.toggleBlock()
+                                    showMenu = false
+                                }
+                            )
+                            
+                            HorizontalDivider()
+                            
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.Archive,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(if (isArchived) "Unarchive" else "Archive")
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.toggleArchive()
+                                    showMenu = false
+                                }
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

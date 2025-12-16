@@ -58,8 +58,24 @@ class NotificationHelper @Inject constructor(
         notificationManager.createNotificationChannel(silentChannel)
     }
 
-    suspend fun showSmsNotification(sender: String?, body: String) {
+    suspend fun showSmsNotification(sender: String?, body: String, threadId: Long? = null) {
         if (sender == null) return
+
+        // Check if number is blocked
+        val blockedNumbers = userPreferences.blockedNumbers.first()
+        if (blockedNumbers.contains(sender)) {
+            // Don't show notification for blocked numbers
+            return
+        }
+
+        // Check if thread is muted
+        if (threadId != null) {
+            val mutedThreads = userPreferences.mutedThreads.first()
+            if (mutedThreads.contains(threadId)) {
+                // Don't show notification for muted threads
+                return
+            }
+        }
 
         val isUnknown = contactChecker.isUnknownContact(sender)
         val noNotificationUnknown = userPreferences.noNotificationForUnknown.first()
