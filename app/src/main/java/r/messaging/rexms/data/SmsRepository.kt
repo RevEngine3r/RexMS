@@ -4,9 +4,11 @@ import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.database.ContentObserver
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.ContactsContract
 import android.provider.Telephony
 import android.telephony.SmsManager
 import android.util.Log
@@ -23,15 +25,11 @@ import javax.inject.Singleton
 @Singleton
 class SmsRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    private val userPreferences: UserPreferences
+    private val userPreferences: UserPreferences,
+    private val contactChecker: ContactChecker
 ) {
     private val contentResolver: ContentResolver = context.contentResolver
 
-    // --- READING DATA (Same as before) ---
-    // ... [Keep getConversations and getMessagesForThread exactly as they were] ...
-
-    // (If you deleted them, I can paste them again, but the read logic is SDK-agnostic)
-    // RE-PASTING READ LOGIC FOR COMPLETENESS:
     fun getConversations(): Flow<List<Conversation>> {
         val conversationsFlow = callbackFlow {
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
@@ -62,7 +60,6 @@ class SmsRepository @Inject constructor(
 
     private fun fetchConversations(): List<Conversation> {
         val conversations = mutableListOf<Conversation>()
-        // Projection reduced to bare minimum for speed
         val projection = arrayOf(
             Telephony.Sms.Conversations.THREAD_ID,
             Telephony.Sms.Conversations.SNIPPET
@@ -79,17 +76,19 @@ class SmsRepository @Inject constructor(
 
             while (it.moveToNext()) {
                 val threadId = it.getLong(threadIdIdx)
-                // Skip invalid threads
                 if (threadId <= 0) continue
 
                 val details = getLastMessageDetails(threadId)
+                val contactName = contactChecker.getContactName(details.address)
+                
                 conversations.add(
                     Conversation(
                         threadId = threadId,
                         address = details.address,
                         body = it.getString(snippetIdx) ?: "",
                         date = details.date,
-                        read = details.read
+                        read = details.read,
+                        senderName = contactName
                     )
                 )
             }
@@ -98,7 +97,6 @@ class SmsRepository @Inject constructor(
     }
 
     private fun getLastMessageDetails(threadId: Long): MessageDetails {
-        // [Same as previous message]
         val uri = Telephony.Sms.CONTENT_URI
         val projection = arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.DATE, Telephony.Sms.READ)
         var details = MessageDetails("Unknown", System.currentTimeMillis(), true)
@@ -121,7 +119,6 @@ class SmsRepository @Inject constructor(
     data class MessageDetails(val address: String, val date: Long, val read: Boolean)
 
     private fun fetchMessages(threadId: Long): List<Message> {
-        // [Same as previous message]
         val messages = mutableListOf<Message>()
         val uri = Telephony.Sms.CONTENT_URI
         contentResolver.query(
@@ -129,6 +126,7 @@ class SmsRepository @Inject constructor(
             arrayOf(threadId.toString()), "date ASC"
         )?.use {
             val idIdx = it.getColumnIndex(Telephony.Sms._ID)
+            val addressIdx = it.getColumnIndex(Telephony.Sms.ADDRESS)
             val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
             val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
             val typeIdx = it.getColumnIndex(Telephony.Sms.TYPE)
@@ -140,7 +138,7 @@ class SmsRepository @Inject constructor(
                     Message(
                         id = it.getLong(idIdx),
                         threadId = threadId,
-                        address = "",
+                        address = it.getString(addressIdx) ?: "",
                         body = it.getString(bodyIdx) ?: "",
                         date = it.getLong(dateIdx),
                         read = it.getInt(readIdx) == 1,
@@ -153,14 +151,72 @@ class SmsRepository @Inject constructor(
         return messages
     }
 
-    // --- WRITING DATA (Updated for SDK 28-36) ---
-
     suspend fun archiveThreads(threadIds: Set<Long>) {
         userPreferences.archiveThreads(threadIds)
     }
 
     suspend fun unarchiveThreads(threadIds: Set<Long>) {
         userPreferences.unarchiveThreads(threadIds)
+    }
+
+    /**
+     * Delete conversations by thread IDs
+     */
+    fun deleteThreads(threadIds: Set<Long>): Result<Unit> {
+        return try {
+            threadIds.forEach { threadId ->
+                val deletedCount = contentResolver.delete(
+                    Telephony.Sms.CONTENT_URI,
+                    "${Telephony.Sms.THREAD_ID} = ?",
+                    arrayOf(threadId.toString())
+                )
+                Log.d("SmsRepo", "Deleted $deletedCount messages from thread $threadId")
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("SmsRepo", "Failed to delete threads", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Delete specific messages by IDs
+     */
+    fun deleteMessages(messageIds: Set<Long>): Result<Unit> {
+        return try {
+            messageIds.forEach { messageId ->
+                contentResolver.delete(
+                    Telephony.Sms.CONTENT_URI,
+                    "${Telephony.Sms._ID} = ?",
+                    arrayOf(messageId.toString())
+                )
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("SmsRepo", "Failed to delete messages", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Mark messages as read
+     */
+    fun markThreadAsRead(threadId: Long): Result<Unit> {
+        return try {
+            val values = ContentValues().apply {
+                put(Telephony.Sms.READ, 1)
+            }
+            contentResolver.update(
+                Telephony.Sms.CONTENT_URI,
+                values,
+                "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
+                arrayOf(threadId.toString())
+            )
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("SmsRepo", "Failed to mark thread as read", e)
+            Result.failure(e)
+        }
     }
 
     fun sendMessage(destinationAddress: String, body: String, subId: Int?) {
@@ -189,7 +245,6 @@ class SmsRepository @Inject constructor(
             throw e
         }
     }
-
 
     /**
      * Cross-version SmsManager retriever.

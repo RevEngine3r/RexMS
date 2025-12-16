@@ -2,29 +2,27 @@ package r.messaging.rexms.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import r.messaging.rexms.data.Conversation
 import r.messaging.rexms.data.SmsRepository
-import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
-import r.messaging.rexms.data.UserPreferences
 import javax.inject.Inject
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val repository: SmsRepository, val userPreferences: UserPreferences
+    private val repository: SmsRepository
 ) : ViewModel() {
 
-    // Converts the Flow from Repository into a UI-friendly StateFlow
-    // "WhileSubscribed(5000)" keeps the connection alive for 5s during rotation
-    val conversations: StateFlow<List<Conversation>> = repository.getConversations()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val conversations = repository.getConversations()
+
+    private val _deleteError = MutableStateFlow<String?>(null)
+    val deleteError: StateFlow<String?> = _deleteError.asStateFlow()
+
+    private val _isDeleting = MutableStateFlow(false)
+    val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
 
     fun archiveThreads(threadIds: Set<Long>) {
         viewModelScope.launch {
@@ -36,5 +34,24 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             repository.unarchiveThreads(threadIds)
         }
+    }
+
+    fun deleteThreads(threadIds: Set<Long>) {
+        viewModelScope.launch {
+            _isDeleting.value = true
+            _deleteError.value = null
+            
+            val result = repository.deleteThreads(threadIds)
+            
+            result.onFailure { error ->
+                _deleteError.value = error.message ?: "Failed to delete conversations"
+            }
+            
+            _isDeleting.value = false
+        }
+    }
+
+    fun clearDeleteError() {
+        _deleteError.value = null
     }
 }
