@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -31,6 +32,8 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import r.messaging.rexms.presentation.components.ConversationItem
+import r.messaging.rexms.presentation.components.MenuDivider
+import r.messaging.rexms.presentation.components.ModernMenuItem
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -129,7 +132,6 @@ fun ConversationListScreen(
     // Error snackbar
     deleteError?.let { error ->
         LaunchedEffect(error) {
-            // Show error and clear after displaying
             kotlinx.coroutines.delay(3000)
             viewModel.clearDeleteError()
         }
@@ -191,7 +193,6 @@ fun ConversationListScreen(
                 contentPadding = padding,
                 modifier = Modifier.fillMaxSize()
             ) {
-                // TELEGRAM STYLE: Archived Row at Top
                 if (archived.isNotEmpty() && !isSearchActive) {
                     item {
                         ArchivedHeaderRow(
@@ -238,8 +239,6 @@ fun ConversationListScreen(
         }
     }
 }
-
-// --- Components ---
 
 @Composable
 fun ArchivedHeaderRow(count: Int, onClick: () -> Unit) {
@@ -305,8 +304,16 @@ fun HomeTopBar(
                     IconButton(onClick = onMenuClick) {
                         Icon(Icons.Default.MoreVert, "Menu")
                     }
-                    DropdownMenu(expanded = showMenu, onDismissRequest = onDismissMenu) {
-                        DropdownMenuItem(text = { Text("Settings") }, onClick = onSettingsClick)
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = onDismissMenu,
+                        offset = DpOffset(x = (-8).dp, y = 0.dp)
+                    ) {
+                        ModernMenuItem(
+                            text = "Settings",
+                            icon = Icons.Default.Settings,
+                            onClick = onSettingsClick
+                        )
                     }
                 }
             }
