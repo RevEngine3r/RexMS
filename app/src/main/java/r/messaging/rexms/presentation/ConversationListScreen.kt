@@ -7,10 +7,16 @@ import android.provider.Telephony
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Message
@@ -24,18 +30,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import r.messaging.rexms.data.Conversation
 import r.messaging.rexms.presentation.components.ConversationItem
 import r.messaging.rexms.presentation.components.MenuDivider
 import r.messaging.rexms.presentation.components.ModernMenuItem
+import r.messaging.rexms.presentation.components.SwipeableConversationItem
 
-@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun ConversationListScreen(
     onNavigateToChat: (Long, String) -> Unit,
@@ -46,6 +56,7 @@ fun ConversationListScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
     val smsPermission = rememberPermissionState(Manifest.permission.READ_SMS)
 
     // State
@@ -58,6 +69,19 @@ fun ConversationListScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     val selectedConversations = remember { mutableStateListOf<Long>() }
+    
+    // Pull to refresh state
+    var isRefreshing by remember { mutableStateOf(false) }
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = isRefreshing,
+        onRefresh = {
+            scope.launch {
+                isRefreshing = true
+                delay(1000) // Simulate refresh - data auto-updates via Flow
+                isRefreshing = false
+            }
+        }
+    )
 
     // Logic to check/request Default SMS Role
     var isDefaultApp by remember { mutableStateOf(true) }
@@ -163,8 +187,10 @@ fun ConversationListScreen(
             }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNavigateToNewConversation) {
-                Icon(Icons.AutoMirrored.Filled.Message, "New Message")
+            AnimatedVisibility(visible = selectedConversations.isEmpty()) {
+                FloatingActionButton(onClick = onNavigateToNewConversation) {
+                    Icon(Icons.AutoMirrored.Filled.Message, "New Message")
+                }
             }
         },
         snackbarHost = {
@@ -189,52 +215,74 @@ fun ConversationListScreen(
                 }
             }
         } else {
-            LazyColumn(
-                contentPadding = padding,
-                modifier = Modifier.fillMaxSize()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pullRefresh(pullRefreshState)
             ) {
-                if (archived.isNotEmpty() && !isSearchActive) {
-                    item {
-                        ArchivedHeaderRow(
-                            count = archived.size,
-                            onClick = onNavigateToArchived
-                        )
-                        HorizontalDivider(
-                            thickness = 0.5.dp,
-                            color = Color.LightGray.copy(alpha = 0.5f)
-                        )
-                    }
-                }
-
-                if (active.isEmpty() && query.isNotEmpty()) {
-                    item {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("No messages found", color = Color.Gray)
+                LazyColumn(
+                    contentPadding = padding,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    if (archived.isNotEmpty() && !isSearchActive) {
+                        item {
+                            ArchivedHeaderRow(
+                                count = archived.size,
+                                onClick = onNavigateToArchived
+                            )
+                            HorizontalDivider(
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
                         }
                     }
-                }
 
-                items(active, key = { it.threadId }) { conversation ->
-                    ConversationItem(
-                        conversation = conversation,
-                        isSelected = selectedConversations.contains(conversation.threadId),
-                        onClick = {
-                            if (selectedConversations.isNotEmpty()) {
-                                toggleSelection(selectedConversations, conversation.threadId)
-                            } else {
-                                onNavigateToChat(conversation.threadId, conversation.address)
+                    if (active.isEmpty() && query.isNotEmpty()) {
+                        item {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "No messages found",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        },
-                        onLongClick = {
-                            toggleSelection(selectedConversations, conversation.threadId)
                         }
-                    )
+                    }
+
+                    items(active, key = { it.threadId }) { conversation ->
+                        SwipeableConversationItem(
+                            conversation = conversation,
+                            isSelected = selectedConversations.contains(conversation.threadId),
+                            onClick = {
+                                if (selectedConversations.isNotEmpty()) {
+                                    toggleSelection(selectedConversations, conversation.threadId)
+                                } else {
+                                    onNavigateToChat(conversation.threadId, conversation.address)
+                                }
+                            },
+                            onLongClick = {
+                                toggleSelection(selectedConversations, conversation.threadId)
+                            },
+                            onArchive = {
+                                viewModel.archiveThreads(setOf(conversation.threadId))
+                            },
+                            onDelete = {
+                                viewModel.deleteThreads(setOf(conversation.threadId))
+                            }
+                        )
+                    }
                 }
+
+                PullRefreshIndicator(
+                    refreshing = isRefreshing,
+                    state = pullRefreshState,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
@@ -249,11 +297,23 @@ fun ArchivedHeaderRow(count: Int, onClick: () -> Unit) {
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Default.Archive, contentDescription = null, tint = Color.Gray)
+        Icon(
+            Icons.Default.Archive,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Spacer(modifier = Modifier.width(16.dp))
         Column {
-            Text("Archived Chats", fontWeight = FontWeight.Bold)
-            Text("$count chats", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text(
+                "Archived Chats",
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                "$count chats",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
