@@ -1,16 +1,19 @@
 package r.messaging.rexms
 
+import android.Manifest
 import android.app.Activity
+import android.app.role.RoleManager
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.provider.Telephony
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -24,6 +27,7 @@ import r.messaging.rexms.presentation.ArchivedScreen
 import r.messaging.rexms.presentation.ChatScreen
 import r.messaging.rexms.presentation.ConversationListScreen
 import r.messaging.rexms.presentation.NewConversationScreen
+import r.messaging.rexms.presentation.PermissionScreen
 import r.messaging.rexms.presentation.SettingsScreen
 import r.messaging.rexms.presentation.getOrCreateThreadId
 import r.messaging.rexms.ui.theme.RexMSTheme
@@ -54,16 +58,59 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppNavigation() {
-    val navController = rememberNavController()
     val context = LocalContext.current
+    val navController = rememberNavController()
     val scope = rememberCoroutineScope()
+
+    // Check if all permissions are granted
+    val hasAllPermissions = remember {
+        derivedStateOf {
+            val requiredPermissions = buildList {
+                add(Manifest.permission.READ_SMS)
+                add(Manifest.permission.SEND_SMS)
+                add(Manifest.permission.RECEIVE_SMS)
+                add(Manifest.permission.READ_CONTACTS)
+                add(Manifest.permission.READ_PHONE_STATE)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+            
+            val allPermissionsGranted = requiredPermissions.all { permission ->
+                ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+            }
+            
+            val isDefaultSmsApp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val roleManager = context.getSystemService(RoleManager::class.java)
+                roleManager?.isRoleHeld(RoleManager.ROLE_SMS) == true
+            } else {
+                Telephony.Sms.getDefaultSmsPackage(context) == context.packageName
+            }
+            
+            allPermissionsGranted && isDefaultSmsApp
+        }
+    }.value
 
     // Handle system back press to exit app from Home
     BackHandler(enabled = navController.previousBackStackEntry == null) {
         (context as? Activity)?.finish()
     }
 
-    NavHost(navController = navController, startDestination = "home") {
+    NavHost(
+        navController = navController, 
+        startDestination = if (hasAllPermissions) "home" else "permissions"
+    ) {
+        
+        // Permission Screen
+        composable("permissions") {
+            PermissionScreen(
+                onAllPermissionsGranted = {
+                    navController.navigate("home") {
+                        popUpTo("permissions") { inclusive = true }
+                    }
+                }
+            )
+        }
 
         // 1. Home Screen (Conversation List)
         composable("home") {
