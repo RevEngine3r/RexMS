@@ -56,6 +56,8 @@ import kotlin.collections.filter
 fun ConversationListScreen(
     onNavigateToChat: (Long, String) -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToArchived: () -> Unit,
+    onNavigateToNewConversation: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     // Only collect conversations if we have permission (prevents crashes if VM fetches on init)
@@ -117,260 +119,103 @@ fun ConversationListScreen(
     }
 
     val (archived, unarchived) = filteredConversations.partition { it.archived }
-    var showArchived by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = active || showNewMessageScreen || selectedConversations.isNotEmpty() || showArchived) {
+    BackHandler(enabled = active || selectedConversations.isNotEmpty()) {
         when {
             selectedConversations.isNotEmpty() -> selectedConversations.clear()
-            showNewMessageScreen -> showNewMessageScreen = false
-            showArchived -> showArchived = false
             active -> active = false
         }
     }
 
-    AnimatedContent(
-        targetState = showNewMessageScreen,
-        label = "ScreenTransition",
-        transitionSpec = {
-            slideInHorizontally { it } togetherWith slideOutHorizontally { -it }
-        }
-    ) { isNewMessageMode ->
-        if (isNewMessageMode) {
-            NewConversationScreen(
-                onBack = { showNewMessageScreen = false },
-                onContactSelected = { address ->
-                    scope.launch {
-                        val threadId = getOrCreateThreadId(context, address)
-                        showNewMessageScreen = false
-                        onNavigateToChat(threadId, address)
-                    }
-                }
-            )
-        } else {
-            Scaffold(
-                topBar = {
-                    if (selectedConversations.isNotEmpty()) {
-                        val selectedConversationObjects = conversations.filter { it.threadId in selectedConversations }
-                        val selectionContainsUnarchived = selectedConversationObjects.any { !it.archived }
-                        val selectionContainsArchived = selectedConversationObjects.any { it.archived }
+    Scaffold(
+        topBar = {
+            if (selectedConversations.isNotEmpty()) {
+                val selectedConversationObjects =
+                    conversations.filter { it.threadId in selectedConversations }
+                val selectionContainsUnarchived = selectedConversationObjects.any { !it.archived }
+                val selectionContainsArchived = selectedConversationObjects.any { it.archived }
 
-                        TopAppBar(
-                            title = { Text("${selectedConversations.size} selected") },
-                            navigationIcon = {
-                                IconButton(onClick = { selectedConversations.clear() }) {
-                                    Icon(Icons.Default.Close, "Clear selection")
-                                }
-                            },
-                            actions = {
-                                if (selectionContainsUnarchived) {
-                                    IconButton(onClick = {
-                                        viewModel.archiveThreads(selectedConversations.toSet())
-                                        selectedConversations.clear()
-                                    }) {
-                                        Icon(Icons.Default.Archive, "Archive")
-                                    }
-                                }
-                                if (selectionContainsArchived) {
-                                    IconButton(onClick = {
-                                        viewModel.unarchiveThreads(selectedConversations.toSet())
-                                        selectedConversations.clear()
-                                    }) {
-                                        Icon(Icons.Default.Unarchive, "Unarchive")
-                                    }
-                                }
+                TopAppBar(
+                    title = { Text("${selectedConversations.size} selected") },
+                    navigationIcon = {
+                        IconButton(onClick = { selectedConversations.clear() }) {
+                            Icon(Icons.Default.Close, "Clear selection")
+                        }
+                    },
+                    actions = {
+                        if (selectionContainsUnarchived) {
+                            IconButton(onClick = {
+                                viewModel.archiveThreads(selectedConversations.toSet())
+                                selectedConversations.clear()
+                            }) {
+                                Icon(Icons.Default.Archive, "Archive")
                             }
-                        )
-                    } else {
-                        SearchBar(
-                            inputField = {
-                                SearchBarDefaults.InputField(
-                                    query = query,
-                                    onQueryChange = { query = it },
-                                    onSearch = { active = false },
-                                    expanded = active,
-                                    onExpandedChange = { active = it },
-                                    placeholder = { Text("Search conversations") },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Search,
-                                            contentDescription = null
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        Box {
-                                            IconButton(onClick = { showMenu = true }) {
-                                                Icon(Icons.Default.MoreVert, "Options")
-                                            }
-                                            DropdownMenu(
-                                                expanded = showMenu,
-                                                onDismissRequest = { showMenu = false }
-                                            ) {
-                                                DropdownMenuItem(
-                                                    text = { Text("Settings") },
-                                                    onClick = {
-                                                        onNavigateToSettings(); showMenu = false
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                )
-                            },
+                        }
+                        if (selectionContainsArchived) {
+                            IconButton(onClick = {
+                                viewModel.unarchiveThreads(selectedConversations.toSet())
+                                selectedConversations.clear()
+                            }) {
+                                Icon(Icons.Default.Unarchive, "Unarchive")
+                            }
+                        }
+                    }
+                )
+            } else {
+                SearchBar(
+                    inputField = {
+                        SearchBarDefaults.InputField(
+                            query = query,
+                            onQueryChange = { query = it },
+                            onSearch = { active = false },
                             expanded = active,
                             onExpandedChange = { active = it },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            content = {
-                                if (smsPermission.status.isGranted) {
-                                    ConversationList(
-                                        conversations = filteredConversations,
-                                        selectedConversations = selectedConversations,
-                                        onConversationClick = { conversation ->
-                                            if (selectedConversations.isNotEmpty()) {
-                                                if (selectedConversations.contains(conversation.threadId)) {
-                                                    selectedConversations.remove(conversation.threadId)
-                                                } else {
-                                                    selectedConversations.add(conversation.threadId)
+                            placeholder = { Text("Search conversations") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = null
+                                )
+                            },
+                            trailingIcon = {
+                                Box {
+                                    IconButton(onClick = { showMenu = true }) {
+                                        Icon(Icons.Default.MoreVert, "Options")
+                                    }
+                                    DropdownMenu(
+                                        expanded = showMenu,
+                                        onDismissRequest = { showMenu = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Settings") },
+                                            onClick = {
+                                                onNavigateToSettings(); showMenu = false
+                                            }
+                                        )
+                                        if (archived.isNotEmpty()) {
+                                            DropdownMenuItem(
+                                                text = { Text("Archived") },
+                                                onClick = {
+                                                    onNavigateToArchived(); showMenu = false
                                                 }
-                                            } else {
-                                                onNavigateToChat(
-                                                    conversation.threadId,
-                                                    conversation.address
-                                                )
-                                                active = false
-                                            }
-                                        },
-                                        onConversationLongClick = { conversation ->
-                                            if (!selectedConversations.contains(conversation.threadId)) {
-                                                selectedConversations.add(conversation.threadId)
-                                            }
+                                            )
                                         }
-                                    )
+                                    }
                                 }
                             }
                         )
-                    }
-                },
-                floatingActionButton = {
-                    if (smsPermission.status.isGranted) {
-                        FloatingActionButton(
-                            onClick = { showNewMessageScreen = true },
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        ) {
-                            Icon(Icons.Default.Add, "New Message")
-                        }
-                    }
-                }
-            ) { padding ->
-                Column(
+                    },
+                    expanded = active,
+                    onExpandedChange = { active = it },
                     modifier = Modifier
-                        .padding(padding)
-                        .fillMaxSize()
-                ) {
-
-                    // --- PERMISSION BLOCKING UI ---
-                    // If permission is NOT granted, show this INSTEAD of the list
-                    if (!smsPermission.status.isGranted) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                                modifier = Modifier.padding(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(48.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "SMS Permission Required",
-                                    style = MaterialTheme.typography.headlineSmall
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "To display your messages, this app needs access to read SMS.",
-                                    textAlign = TextAlign.Center,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(24.dp))
-                                Button(onClick = { smsPermission.launchPermissionRequest() }) {
-                                    Text("Grant Permission")
-                                }
-                            }
-                        }
-                    } else {
-                        // --- NORMAL LIST UI ---
-                        if (!isDefaultApp) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.errorContainer,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                            val roleManager =
-                                                context.getSystemService(RoleManager::class.java)
-                                            if (roleManager.isRoleAvailable(RoleManager.ROLE_SMS)) {
-                                                changeDefaultLauncher.launch(
-                                                    roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS)
-                                                )
-                                            }
-                                        } else {
-                                            val intent =
-                                                Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
-                                            intent.putExtra(
-                                                Telephony.Sms.Intents.EXTRA_PACKAGE_NAME,
-                                                context.packageName
-                                            )
-                                            changeDefaultLauncher.launch(intent)
-                                        }
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.Warning,
-                                        null,
-                                        tint = MaterialTheme.colorScheme.onErrorContainer
-                                    )
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Text(
-                                        "Tap to set as Default SMS App",
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                            }
-                        }
-
-                        if (conversations.isEmpty()) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("No messages found", color = Color.Gray)
-                            }
-                        } else {
-                            Column {
-                                if (archived.isNotEmpty() && !showArchived) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { showArchived = true }
-                                            .padding(16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.Archive, contentDescription = "Archived")
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Text("Archived (${archived.count { !it.read }})")
-                                    }
-                                }
-                                val onConversationClick = { conversation: r.messaging.rexms.data.Conversation ->
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    content = {
+                        if (smsPermission.status.isGranted) {
+                            ConversationList(
+                                conversations = unarchived,
+                                selectedConversations = selectedConversations,
+                                onConversationClick = { conversation ->
                                     if (selectedConversations.isNotEmpty()) {
                                         if (selectedConversations.contains(conversation.threadId)) {
                                             selectedConversations.remove(conversation.threadId)
@@ -382,110 +227,30 @@ fun ConversationListScreen(
                                             conversation.threadId,
                                             conversation.address
                                         )
+                                        active = false
                                     }
-                                }
-                                val onConversationLongClick = { conversation: r.messaging.rexms.data.Conversation ->
+                                },
+                                onConversationLongClick = { conversation ->
                                     if (!selectedConversations.contains(conversation.threadId)) {
                                         selectedConversations.add(conversation.threadId)
                                     }
                                 }
-                                if (showArchived) {
-                                    Column {
-                                        TextButton(onClick = { showArchived = false }) {
-                                            Text("Go back")
-                                        }
-                                        ConversationList(
-                                            conversations = archived,
-                                            selectedConversations = selectedConversations,
-                                            onConversationClick = onConversationClick,
-                                            onConversationLongClick = onConversationLongClick
-                                        )
-                                    }
-                                } else {
-                                    ConversationList(
-                                        conversations = unarchived,
-                                        selectedConversations = selectedConversations,
-                                        onConversationClick = onConversationClick,
-                                        onConversationLongClick = onConversationLongClick
-                                    )
-                                }
-                            }
+                            )
                         }
                     }
+                )
+            }
+        },
+        floatingActionButton = {
+            if (smsPermission.status.isGranted) {
+                FloatingActionButton(
+                    onClick = { onNavigateToNewConversation() },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ) {
+                    Icon(Icons.Default.Add, "New Message")
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun ConversationList(
-    conversations: List<r.messaging.rexms.data.Conversation>,
-    selectedConversations: List<Long>,
-    onConversationClick: (r.messaging.rexms.data.Conversation) -> Unit,
-    onConversationLongClick: (r.messaging.rexms.data.Conversation) -> Unit
-) {
-    LazyColumn(
-        contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
-    ) {
-        items(
-            conversations,
-            key = { it.threadId }) { conversation ->
-            ConversationItem(
-                conversation = conversation,
-                isSelected = selectedConversations.contains(conversation.threadId),
-                onClick = { onConversationClick(conversation) },
-                onLongClick = { onConversationLongClick(conversation) }
-            )
-        }
-    }
-}
-
-// ... (Rest of NewConversationScreen and Helper functions remain identical to previous answer)
-
-@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
-@Composable
-fun NewConversationScreen(
-    onBack: () -> Unit,
-    onContactSelected: (String) -> Unit
-) {
-    val context = LocalContext.current
-    val contactPermission = rememberPermissionState(Manifest.permission.READ_CONTACTS)
-
-    var searchQuery by remember { mutableStateOf("") }
-    var allContacts by remember { mutableStateOf<List<ContactItem>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-
-    LaunchedEffect(contactPermission.status.isGranted) {
-        if (contactPermission.status.isGranted) {
-            isLoading = true
-            allContacts = loadDeviceContacts(context)
-            isLoading = false
-        }
-    }
-
-    val filteredContacts = remember(searchQuery, allContacts) {
-        if (searchQuery.isBlank()) allContacts else {
-            allContacts.filter {
-                it.name.contains(searchQuery, ignoreCase = true) ||
-                        it.phoneNumber.contains(searchQuery)
-            }
-        }
-    }
-
-    val isNumericQuery =
-        searchQuery.isNotBlank() && searchQuery.all { it.isDigit() || it == '+' || it == ' ' || it == '-' }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("New conversation") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                    }
-                }
-            )
         }
     ) { padding ->
         Column(
@@ -493,160 +258,120 @@ fun NewConversationScreen(
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-            ) {
-                Text("To", style = MaterialTheme.typography.titleMedium, color = Color.Gray)
-                Spacer(modifier = Modifier.width(16.dp))
-                TextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Type a name or number") },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    ),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                    modifier = Modifier.weight(1f)
-                )
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Clear, "Clear")
-                    }
-                }
-            }
-            HorizontalDivider()
 
-            if (!contactPermission.status.isGranted) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Access to contacts is required to search.")
+            // --- PERMISSION BLOCKING UI ---
+            // If permission is NOT granted, show this INSTEAD of the list
+            if (!smsPermission.status.isGranted) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "SMS Permission Required",
+                            style = MaterialTheme.typography.headlineSmall
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Button(onClick = { contactPermission.launchPermissionRequest() }) {
+                        Text(
+                            text = "To display your messages, this app needs access to read SMS.",
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(onClick = { smsPermission.launchPermissionRequest() }) {
                             Text("Grant Permission")
                         }
                     }
                 }
-            } else if (isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    if (isNumericQuery) {
-                        item {
-                            ListItem(
-                                headlineContent = { Text("Send to $searchQuery") },
-                                leadingContent = { Icon(Icons.Default.Dialpad, null) },
-                                modifier = Modifier.clickable { onContactSelected(searchQuery) }
-                            )
-                        }
-                    }
-                    if (filteredContacts.isEmpty() && !isNumericQuery && searchQuery.isNotBlank()) {
-                        item {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("No contacts found", color = Color.Gray)
-                            }
-                        }
-                    } else {
-                        if (searchQuery.isEmpty()) {
-                            item {
-                                Text(
-                                    "Top contacts",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(
-                                        start = 16.dp,
-                                        top = 16.dp,
-                                        bottom = 8.dp
-                                    )
-                                )
-                            }
-                        }
-                        items(filteredContacts, key = { it.id + it.phoneNumber }) { contact ->
-                            ListItem(
-                                modifier = Modifier.clickable { onContactSelected(contact.phoneNumber) },
-                                leadingContent = {
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.primaryContainer)
-                                    ) {
-                                        Text(
-                                            text = contact.name.firstOrNull()?.toString() ?: "#",
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            fontWeight = FontWeight.Bold
+                // --- NORMAL LIST UI ---
+                if (!isDefaultApp) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    val roleManager =
+                                        context.getSystemService(RoleManager::class.java)
+                                    if (roleManager.isRoleAvailable(RoleManager.ROLE_SMS)) {
+                                        changeDefaultLauncher.launch(
+                                            roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS)
                                         )
                                     }
-                                },
-                                headlineContent = { Text(contact.name) },
-                                supportingContent = { Text(contact.phoneNumber) }
+                                } else {
+                                    val intent =
+                                        Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
+                                    intent.putExtra(
+                                        Telephony.Sms.Intents.EXTRA_PACKAGE_NAME,
+                                        context.packageName
+                                    )
+                                    changeDefaultLauncher.launch(intent)
+                                }
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Warning,
+                                null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                "Tap to set as Default SMS App",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium
                             )
                         }
                     }
                 }
-            }
-        }
-    }
-}
 
-private suspend fun loadDeviceContacts(context: Context): List<ContactItem> =
-    withContext(Dispatchers.IO) {
-        val contacts = mutableListOf<ContactItem>()
-        try {
-            val cursor = context.contentResolver.query(
-                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                arrayOf(
-                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
-                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-                    ContactsContract.CommonDataKinds.Phone.NUMBER
-                ),
-                null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
-            )
-            cursor?.use {
-                val idIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
-                val nameIndex =
-                    it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
-                val numberIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                while (it.moveToNext()) {
-                    val id = if (idIndex != -1) it.getString(idIndex) else "0"
-                    val name = if (nameIndex != -1) it.getString(nameIndex) else "Unknown"
-                    val number = if (numberIndex != -1) it.getString(numberIndex) else ""
-                    if (number.isNotBlank()) contacts.add(ContactItem(name, number, id))
+                if (conversations.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No messages found", color = Color.Gray)
+                    }
+                } else {
+                    ConversationList(
+                        conversations = unarchived,
+                        selectedConversations = selectedConversations,
+                        onConversationClick = { conversation ->
+                            if (selectedConversations.isNotEmpty()) {
+                                if (selectedConversations.contains(conversation.threadId)) {
+                                    selectedConversations.remove(conversation.threadId)
+                                } else {
+                                    selectedConversations.add(conversation.threadId)
+                                }
+                            } else {
+                                onNavigateToChat(
+                                    conversation.threadId,
+                                    conversation.address
+                                )
+                            }
+                        },
+                        onConversationLongClick = { conversation ->
+                            if (!selectedConversations.contains(conversation.threadId)) {
+                                selectedConversations.add(conversation.threadId)
+                            }
+                        }
+                    )
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
-        return@withContext contacts.distinctBy { it.phoneNumber }
-    }
-
-private suspend fun getOrCreateThreadId(context: Context, address: String): Long {
-    return withContext(Dispatchers.IO) {
-        try {
-            val builder = "content://mms-sms/threadID".toUri().buildUpon()
-            builder.appendQueryParameter("recipient", address)
-            val cursor =
-                context.contentResolver.query(
-                    builder.build(), arrayOf("_id"),
-                    null, null, null
-                )
-            cursor?.use { if (it.moveToFirst()) return@withContext it.getLong(0) }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return@withContext 0L
     }
 }
+
+

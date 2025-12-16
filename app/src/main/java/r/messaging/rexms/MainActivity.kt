@@ -8,8 +8,11 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
+import kotlinx.coroutines.launch
+import r.messaging.rexms.presentation.getOrCreateThreadId
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -17,8 +20,10 @@ import androidx.navigation.navArgument
 import dagger.hilt.android.AndroidEntryPoint
 import r.messaging.rexms.data.AppTheme
 import r.messaging.rexms.data.UserPreferences
+import r.messaging.rexms.presentation.ArchivedScreen
 import r.messaging.rexms.presentation.ChatScreen
 import r.messaging.rexms.presentation.ConversationListScreen
+import r.messaging.rexms.presentation.NewConversationScreen
 import r.messaging.rexms.presentation.SettingsScreen
 import r.messaging.rexms.ui.theme.RexMSTheme
 import javax.inject.Inject
@@ -65,6 +70,37 @@ fun AppNavigation() {
                 },
                 onNavigateToSettings = {
                     navController.navigate("settings")
+                },
+                onNavigateToArchived = {
+                    navController.navigate("archived")
+                },
+                onNavigateToNewConversation = {
+                    navController.navigate("newConversation")
+                }
+            )
+        }
+
+
+        // 4. Archived Screen
+        composable("archived") {
+            ArchivedScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToChat = { threadId, address ->
+                    navController.navigate("chat/$threadId?address=$address")
+                }
+            )
+        }
+
+        // 5. New Conversation Screen
+        composable("newConversation") {
+            val scope = rememberCoroutineScope()
+            NewConversationScreen(
+                onBack = { navController.popBackStack() },
+                onContactSelected = { address ->
+                    scope.launch {
+                        val threadId = getOrCreateThreadId(context, address)
+                        navController.navigate("chat/$threadId?address=$address")
+                    }
                 }
             )
         }
