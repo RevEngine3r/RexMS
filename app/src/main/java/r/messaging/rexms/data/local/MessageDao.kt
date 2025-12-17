@@ -56,6 +56,13 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE threadId = :threadId")
     suspend fun getMessageCount(threadId: Long): Int
     
+    @Query("SELECT MAX(lastSyncTime) FROM messages")
+    suspend fun getLastSyncTime(): Long?
+    
+    /**
+     * Get the last sync time for a specific thread
+     * Used for incremental sync - only fetch messages newer than this timestamp
+     */
     @Query("SELECT MAX(lastSyncTime) FROM messages WHERE threadId = :threadId")
-    suspend fun getLastSyncTime(threadId: Long): Long?
+    suspend fun getLastSyncTimeForThread(threadId: Long): Long?
 }
