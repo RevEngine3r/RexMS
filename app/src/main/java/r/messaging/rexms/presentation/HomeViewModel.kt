@@ -8,12 +8,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import r.messaging.rexms.data.Conversation
-import r.messaging.rexms.data.SmsRepository
+import r.messaging.rexms.data.SmsRepositoryOptimized
 import javax.inject.Inject
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val repository: SmsRepository
+    private val repository: SmsRepositoryOptimized
 ) : ViewModel() {
 
     val conversations = repository.getConversations()
