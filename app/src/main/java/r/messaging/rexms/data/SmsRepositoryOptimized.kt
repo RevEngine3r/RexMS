@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
+import androidx.paging.map
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -41,7 +43,7 @@ class SmsRepositoryOptimized @Inject constructor(
     private val database: SmsDatabase,
     private val userPreferences: UserPreferences,
     private val contactChecker: ContactChecker
-) {
+) : SmsRepository {
     private val contentResolver: ContentResolver = context.contentResolver
     private val conversationDao = database.conversationDao()
     private val messageDao = database.messageDao()
@@ -57,7 +59,8 @@ class SmsRepositoryOptimized @Inject constructor(
     /**
      * OPTIMIZED: Returns cached data immediately, syncs in background
      */
-    fun getConversations(): Flow<List<Conversation>> {
+    @OptIn(FlowPreview::class)
+    override fun getConversations(): Flow<List<Conversation>> {
         // Trigger background sync on first call
         triggerBackgroundSync()
 
@@ -110,7 +113,7 @@ class SmsRepositoryOptimized @Inject constructor(
     /**
      * PAGING 3: Returns paginated conversations for better memory efficiency
      */
-    fun getConversationsPaged(): Flow<PagingData<Conversation>> {
+    override fun getConversationsPaged(): Flow<PagingData<Conversation>> {
         triggerBackgroundSync()
 
         return Pager(
@@ -122,16 +125,17 @@ class SmsRepositoryOptimized @Inject constructor(
             ),
             pagingSourceFactory = { conversationDao.getConversationsPagingSource() }
         ).flow
+            .flowOn(Dispatchers.IO)
             .map { pagingData ->
                 pagingData.map { entity -> entity.toConversation() }
             }
-            .flowOn(Dispatchers.IO)
     }
 
     /**
      * OPTIMIZED: Load messages from cache first, sync in background
      */
-    fun getMessagesForThread(threadId: Long): Flow<List<Message>> {
+    @OptIn(FlowPreview::class)
+    override fun getMessagesForThread(threadId: Long): Flow<List<Message>> {
         triggerMessageSync(threadId)
 
         return messageDao.getMessagesForThread(threadId)
@@ -157,7 +161,7 @@ class SmsRepositoryOptimized @Inject constructor(
     }
 
     private suspend fun observeConversationChanges() = withContext(Dispatchers.IO) {
-        callbackFlow {
+        callbackFlow<Unit> {
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
                     repositoryScope.launch {
@@ -172,7 +176,7 @@ class SmsRepositoryOptimized @Inject constructor(
     }
 
     private suspend fun observeMessageChanges(threadId: Long) = withContext(Dispatchers.IO) {
-        callbackFlow {
+        callbackFlow<Unit> {
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
                     repositoryScope.launch {
@@ -205,116 +209,118 @@ class SmsRepositoryOptimized @Inject constructor(
         }
     }
 
-    private suspend fun fetchConversationsOptimized(lastSyncTime: Long): List<ConversationEntity> = withContext(Dispatchers.IO) {
-        val conversations = mutableListOf<ConversationEntity>()
-        val projection = arrayOf(
-            Telephony.Sms.Conversations.THREAD_ID,
-            Telephony.Sms.Conversations.SNIPPET
-        )
-
-        try {
-            val selection = if (lastSyncTime > 0) {
-                "${Telephony.Sms.DATE} > ?"
-            } else {
-                null
-            }
-
-            val selectionArgs = if (lastSyncTime > 0) {
-                arrayOf(lastSyncTime.toString())
-            } else {
-                null
-            }
-
-            contentResolver.query(
-                Telephony.Sms.Conversations.CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                "${Telephony.Sms.Conversations.DEFAULT_SORT_ORDER} LIMIT 500"
-            )?.use { cursor ->
-                val threadIdIdx = cursor.getColumnIndex(Telephony.Sms.Conversations.THREAD_ID)
-                val snippetIdx = cursor.getColumnIndex(Telephony.Sms.Conversations.SNIPPET)
-
-                val threadIds = mutableListOf<Long>()
-                while (cursor.moveToNext()) {
-                    threadIds.add(cursor.getLong(threadIdIdx))
-                }
-
-                if (threadIds.isEmpty()) {
-                    return@withContext emptyList()
-                }
-
-                val detailsMap = batchFetchConversationDetails(threadIds)
-
-                cursor.moveToPosition(-1)
-                while (cursor.moveToNext()) {
-                    val threadId = cursor.getLong(threadIdIdx)
-                    val details = detailsMap[threadId] ?: continue
-
-                    conversations.add(
-                        ConversationEntity(
-                            threadId = threadId,
-                            address = details.address,
-                            body = cursor.getString(snippetIdx) ?: "",
-                            date = details.date,
-                            read = details.read,
-                            senderName = getContactNameCached(details.address),
-                            photoUri = null,
-                            lastSyncTime = System.currentTimeMillis()
-                        )
-                    )
-                }
-            }
-        } catch (e: SecurityException) {
-            Log.e("SmsRepoOpt", "Permission denied", e)
-        }
-
-        return@withContext conversations
-    }
-
-    private suspend fun batchFetchConversationDetails(threadIds: List<Long>): Map<Long, MessageDetails> = withContext(Dispatchers.IO) {
-        val detailsMap = mutableMapOf<Long, MessageDetails>()
-        if (threadIds.isEmpty()) return@withContext detailsMap
-
-        try {
+    private suspend fun fetchConversationsOptimized(lastSyncTime: Long): List<ConversationEntity> =
+        withContext(Dispatchers.IO) {
+            val conversations = mutableListOf<ConversationEntity>()
             val projection = arrayOf(
-                Telephony.Sms.THREAD_ID,
-                Telephony.Sms.ADDRESS,
-                Telephony.Sms.DATE,
-                Telephony.Sms.READ
+                Telephony.Sms.Conversations.THREAD_ID,
+                Telephony.Sms.Conversations.SNIPPET
             )
 
-            contentResolver.query(
-                Telephony.Sms.CONTENT_URI,
-                projection,
-                "${Telephony.Sms.THREAD_ID} IN (${threadIds.joinToString(",")})",
-                null,
-                "${Telephony.Sms.THREAD_ID}, ${Telephony.Sms.DATE} DESC"
-            )?.use { cursor ->
-                val threadIdIdx = cursor.getColumnIndex(Telephony.Sms.THREAD_ID)
-                val addressIdx = cursor.getColumnIndex(Telephony.Sms.ADDRESS)
-                val dateIdx = cursor.getColumnIndex(Telephony.Sms.DATE)
-                val readIdx = cursor.getColumnIndex(Telephony.Sms.READ)
+            try {
+                val selection = if (lastSyncTime > 0) {
+                    "${Telephony.Sms.DATE} > ?"
+                } else {
+                    null
+                }
 
-                var lastThreadId = -1L
-                while (cursor.moveToNext()) {
-                    val threadId = cursor.getLong(threadIdIdx)
-                    if (threadId != lastThreadId) {
-                        detailsMap[threadId] = MessageDetails(
-                            cursor.getString(addressIdx) ?: "Unknown",
-                            cursor.getLong(dateIdx),
-                            cursor.getInt(readIdx) == 1
+                val selectionArgs = if (lastSyncTime > 0) {
+                    arrayOf(lastSyncTime.toString())
+                } else {
+                    null
+                }
+
+                contentResolver.query(
+                    Telephony.Sms.Conversations.CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    "${Telephony.Sms.Conversations.DEFAULT_SORT_ORDER} LIMIT 500"
+                )?.use { cursor ->
+                    val threadIdIdx = cursor.getColumnIndex(Telephony.Sms.Conversations.THREAD_ID)
+                    val snippetIdx = cursor.getColumnIndex(Telephony.Sms.Conversations.SNIPPET)
+
+                    val threadIds = mutableListOf<Long>()
+                    while (cursor.moveToNext()) {
+                        threadIds.add(cursor.getLong(threadIdIdx))
+                    }
+
+                    if (threadIds.isEmpty()) {
+                        return@withContext emptyList()
+                    }
+
+                    val detailsMap = batchFetchConversationDetails(threadIds)
+
+                    cursor.moveToPosition(-1)
+                    while (cursor.moveToNext()) {
+                        val threadId = cursor.getLong(threadIdIdx)
+                        val details = detailsMap[threadId] ?: continue
+
+                        conversations.add(
+                            ConversationEntity(
+                                threadId = threadId,
+                                address = details.address,
+                                body = cursor.getString(snippetIdx) ?: "",
+                                date = details.date,
+                                read = details.read,
+                                senderName = getContactNameCached(details.address),
+                                photoUri = null,
+                                lastSyncTime = System.currentTimeMillis()
+                            )
                         )
-                        lastThreadId = threadId
                     }
                 }
+            } catch (e: SecurityException) {
+                Log.e("SmsRepoOpt", "Permission denied", e)
             }
-        } catch (e: Exception) {
-            Log.e("SmsRepoOpt", "Batch fetch failed", e)
+
+            return@withContext conversations
         }
 
-        return@withContext detailsMap
-    }
+    private suspend fun batchFetchConversationDetails(threadIds: List<Long>): Map<Long, MessageDetails> =
+        withContext(Dispatchers.IO) {
+            val detailsMap = mutableMapOf<Long, MessageDetails>()
+            if (threadIds.isEmpty()) return@withContext detailsMap
+
+            try {
+                val projection = arrayOf(
+                    Telephony.Sms.THREAD_ID,
+                    Telephony.Sms.ADDRESS,
+                    Telephony.Sms.DATE,
+                    Telephony.Sms.READ
+                )
+
+                contentResolver.query(
+                    Telephony.Sms.CONTENT_URI,
+                    projection,
+                    "${Telephony.Sms.THREAD_ID} IN (${threadIds.joinToString(",")})",
+                    null,
+                    "${Telephony.Sms.THREAD_ID}, ${Telephony.Sms.DATE} DESC"
+                )?.use { cursor ->
+                    val threadIdIdx = cursor.getColumnIndex(Telephony.Sms.THREAD_ID)
+                    val addressIdx = cursor.getColumnIndex(Telephony.Sms.ADDRESS)
+                    val dateIdx = cursor.getColumnIndex(Telephony.Sms.DATE)
+                    val readIdx = cursor.getColumnIndex(Telephony.Sms.READ)
+
+                    var lastThreadId = -1L
+                    while (cursor.moveToNext()) {
+                        val threadId = cursor.getLong(threadIdIdx)
+                        if (threadId != lastThreadId) {
+                            detailsMap[threadId] = MessageDetails(
+                                cursor.getString(addressIdx) ?: "Unknown",
+                                cursor.getLong(dateIdx),
+                                cursor.getInt(readIdx) == 1
+                            )
+                            lastThreadId = threadId
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("SmsRepoOpt", "Batch fetch failed", e)
+            }
+
+            return@withContext detailsMap
+        }
 
     private suspend fun syncMessagesFromProvider(threadId: Long) = withContext(Dispatchers.IO) {
         if (!hasReadSmsPermission()) return@withContext
@@ -397,7 +403,7 @@ class SmsRepositoryOptimized @Inject constructor(
         return@withContext messages
     }
 
-    private suspend fun cleanupStaleConversations(currentThreadIds: List<Long>) {
+    private fun cleanupStaleConversations(currentThreadIds: List<Long>) {
         // TODO: Implement cleanup of stale conversations if needed
     }
 
@@ -405,15 +411,15 @@ class SmsRepositoryOptimized @Inject constructor(
         return contactChecker.getContactName(address)
     }
 
-    suspend fun archiveThreads(threadIds: Set<Long>) {
+    override suspend fun archiveThreads(threadIds: Set<Long>) {
         userPreferences.archiveThreads(threadIds)
     }
 
-    suspend fun unarchiveThreads(threadIds: Set<Long>) {
+    override suspend fun unarchiveThreads(threadIds: Set<Long>) {
         userPreferences.unarchiveThreads(threadIds)
     }
 
-    fun deleteThreads(threadIds: Set<Long>): Result<Unit> {
+    override fun deleteThreads(threadIds: Set<Long>): Result<Unit> {
         if (!hasReadSmsPermission()) {
             return Result.failure(SecurityException("READ_SMS permission not granted"))
         }
@@ -439,7 +445,7 @@ class SmsRepositoryOptimized @Inject constructor(
         }
     }
 
-    fun deleteMessages(messageIds: Set<Long>): Result<Unit> {
+    override fun deleteMessages(messageIds: Set<Long>): Result<Unit> {
         if (!hasReadSmsPermission()) {
             return Result.failure(SecurityException("READ_SMS permission not granted"))
         }
@@ -463,7 +469,7 @@ class SmsRepositoryOptimized @Inject constructor(
         }
     }
 
-    fun markThreadAsRead(threadId: Long): Result<Unit> {
+    override fun markThreadAsRead(threadId: Long): Result<Unit> {
         if (!hasReadSmsPermission()) {
             return Result.failure(SecurityException("READ_SMS permission not granted"))
         }
@@ -485,7 +491,7 @@ class SmsRepositoryOptimized @Inject constructor(
         }
     }
 
-    fun sendMessage(destinationAddress: String, body: String, subId: Int?) {
+    override fun sendMessage(destinationAddress: String, body: String, subId: Int?) {
         try {
             val smsManager = getSmsManagerCompat(subId)
             val parts = smsManager.divideMessage(body)
