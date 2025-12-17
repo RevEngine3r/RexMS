@@ -10,14 +10,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import r.messaging.rexms.data.ContactChecker
-import r.messaging.rexms.data.SmsRepository
+import r.messaging.rexms.data.SmsRepositoryOptimized
 import r.messaging.rexms.data.UserPreferences
 import javax.inject.Inject
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val repository: SmsRepository,
+    private val repository: SmsRepositoryOptimized,
     private val contactChecker: ContactChecker,
     private val userPreferences: UserPreferences
 ) : ViewModel() {
