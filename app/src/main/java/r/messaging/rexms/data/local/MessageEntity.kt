@@ -11,7 +11,7 @@ import r.messaging.rexms.data.Message
         Index(value = ["threadId", "date"], name = "idx_thread_date"),
         Index(value = ["address", "date"], name = "idx_address_date"),
         Index(value = ["type"], name = "idx_type"),
-        Index(value = ["read"], name = "idx_read")
+        Index(value = ["read"], name = "idx_msg_read")
     ]
 )
 data class MessageEntity(

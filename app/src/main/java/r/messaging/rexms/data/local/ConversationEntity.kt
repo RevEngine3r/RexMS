@@ -10,7 +10,7 @@ import r.messaging.rexms.data.Conversation
     indices = [
         Index(value = ["date"], name = "idx_date"),
         Index(value = ["address"], name = "idx_address"),
-        Index(value = ["read"], name = "idx_read")
+        Index(value = ["read"], name = "idx_conv_read")
     ]
 )
 data class ConversationEntity(
