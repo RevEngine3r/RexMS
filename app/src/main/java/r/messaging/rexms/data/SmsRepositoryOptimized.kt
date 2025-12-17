@@ -16,7 +16,6 @@ import androidx.core.content.ContextCompat
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
-import androidx.paging.map
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -28,7 +27,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -40,17 +38,14 @@ import javax.inject.Singleton
 @Singleton
 class SmsRepositoryOptimized @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    database: SmsDatabase,
+    private val database: SmsDatabase,
     private val userPreferences: UserPreferences,
     private val contactChecker: ContactChecker
-) : SmsRepository {
+) {
     private val contentResolver: ContentResolver = context.contentResolver
     private val conversationDao = database.conversationDao()
     private val messageDao = database.messageDao()
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    // Contact name cache to avoid repeated lookups
-    private val contactCache = mutableMapOf<String, String?>()
 
     private fun hasReadSmsPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
@@ -61,16 +56,14 @@ class SmsRepositoryOptimized @Inject constructor(
 
     /**
      * OPTIMIZED: Returns cached data immediately, syncs in background
-     * From 3s to ~50ms for initial load
      */
-    @OptIn(FlowPreview::class)
-    override fun getConversations(): Flow<List<Conversation>> {
+    fun getConversations(): Flow<List<Conversation>> {
         // Trigger background sync on first call
         triggerBackgroundSync()
 
         // Return cached data with debounced updates
         return conversationDao.getAllConversations()
-            .debounce(300) // Prevent UI thrashing during rapid updates
+            .debounce(300)
             .map { entities ->
                 entities.map { it.toConversation() }
             }
@@ -78,10 +71,37 @@ class SmsRepositoryOptimized @Inject constructor(
                 conversations.map { it.copy(archived = it.threadId in archivedIds) }
             }
             .combine(userPreferences.autoArchiveUnknown) { conversations, autoArchiveEnabled ->
-                if (autoArchiveEnabled) {
-                    handleAutoArchive(conversations)
-                } else {
-                    conversations
+                if (!autoArchiveEnabled || conversations.isEmpty()) {
+                    return@combine conversations
+                }
+
+                // Batch resolve unknown addresses using cached helper
+                val unknownAddresses = contactChecker.findUnknownAddresses(
+                    conversations.map { it.address }
+                )
+
+                if (unknownAddresses.isEmpty()) {
+                    return@combine conversations
+                }
+
+                val unknownThreadIds = conversations
+                    .asSequence()
+                    .filter { it.address in unknownAddresses && !it.archived }
+                    .map { it.threadId }
+                    .toSet()
+
+                if (unknownThreadIds.isNotEmpty()) {
+                    repositoryScope.launch {
+                        userPreferences.archiveThreads(unknownThreadIds)
+                    }
+                }
+
+                conversations.map { conversation ->
+                    if (conversation.address in unknownAddresses) {
+                        conversation.copy(archived = true)
+                    } else {
+                        conversation
+                    }
                 }
             }
             .flowOn(Dispatchers.IO)
@@ -89,10 +109,8 @@ class SmsRepositoryOptimized @Inject constructor(
 
     /**
      * PAGING 3: Returns paginated conversations for better memory efficiency
-     * Loads 20 conversations at a time, ideal for large message lists (1000+ conversations)
      */
-    override fun getConversationsPaged(): Flow<PagingData<Conversation>> {
-        // Trigger initial sync
+    fun getConversationsPaged(): Flow<PagingData<Conversation>> {
         triggerBackgroundSync()
 
         return Pager(
@@ -104,18 +122,16 @@ class SmsRepositoryOptimized @Inject constructor(
             ),
             pagingSourceFactory = { conversationDao.getConversationsPagingSource() }
         ).flow
-            .flowOn(Dispatchers.IO)
             .map { pagingData ->
                 pagingData.map { entity -> entity.toConversation() }
             }
+            .flowOn(Dispatchers.IO)
     }
 
     /**
      * OPTIMIZED: Load messages from cache first, sync in background
-     * From 2s to ~30ms for initial load
      */
-    override fun getMessagesForThread(threadId: Long): Flow<List<Message>> {
-        // Trigger background sync for this thread
+    fun getMessagesForThread(threadId: Long): Flow<List<Message>> {
         triggerMessageSync(threadId)
 
         return messageDao.getMessagesForThread(threadId)
@@ -124,27 +140,6 @@ class SmsRepositoryOptimized @Inject constructor(
                 entities.map { it.toMessage() }
             }
             .flowOn(Dispatchers.IO)
-    }
-
-    private fun handleAutoArchive(conversations: List<Conversation>): List<Conversation> {
-        val unknownThreadIds = conversations
-            .filter { isContactCached(it.address) == false && !it.archived }
-            .map { it.threadId }
-            .toSet()
-
-        if (unknownThreadIds.isNotEmpty()) {
-            repositoryScope.launch {
-                userPreferences.archiveThreads(unknownThreadIds)
-            }
-        }
-
-        return conversations.map { conversation ->
-            if (isContactCached(conversation.address) == false) {
-                conversation.copy(archived = true)
-            } else {
-                conversation
-            }
-        }
     }
 
     private fun triggerBackgroundSync() {
@@ -162,22 +157,22 @@ class SmsRepositoryOptimized @Inject constructor(
     }
 
     private suspend fun observeConversationChanges() = withContext(Dispatchers.IO) {
-        callbackFlow<Unit> {
+        callbackFlow {
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
                     repositoryScope.launch {
-                        delay(500) // Debounce rapid changes
+                        delay(500)
                         syncConversationsFromProvider()
                     }
                 }
             }
             contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
             awaitClose { contentResolver.unregisterContentObserver(observer) }
-        }.collectLatest {}
+        }.collectLatest { }
     }
 
     private suspend fun observeMessageChanges(threadId: Long) = withContext(Dispatchers.IO) {
-        callbackFlow<Unit> {
+        callbackFlow {
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
                     repositoryScope.launch {
@@ -188,29 +183,20 @@ class SmsRepositoryOptimized @Inject constructor(
             }
             contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
             awaitClose { contentResolver.unregisterContentObserver(observer) }
-        }.collectLatest {}
+        }.collectLatest { }
     }
 
-    /**
-     * INCREMENTAL SYNC: Only fetch conversations changed since last sync
-     * First sync: ~3 seconds for 1000 conversations
-     * Subsequent syncs: ~10ms (only new/changed messages)
-     */
     private suspend fun syncConversationsFromProvider() = withContext(Dispatchers.IO) {
         if (!hasReadSmsPermission()) return@withContext
 
         try {
             val lastSyncTime = conversationDao.getLastSyncTime() ?: 0L
-            Log.d("SmsRepoOpt", "Incremental sync: lastSyncTime=$lastSyncTime")
-
             val conversations = fetchConversationsOptimized(lastSyncTime)
 
             if (conversations.isNotEmpty()) {
                 conversationDao.insertConversations(conversations)
-                Log.d("SmsRepoOpt", "Synced ${conversations.size} conversations")
             }
 
-            // Clean up old conversations not in provider (only on full sync)
             if (lastSyncTime == 0L) {
                 cleanupStaleConversations(conversations.map { it.threadId })
             }
@@ -219,134 +205,117 @@ class SmsRepositoryOptimized @Inject constructor(
         }
     }
 
-    /**
-     * INCREMENTAL: Fetch only conversations with messages newer than lastSyncTime
-     */
-    private suspend fun fetchConversationsOptimized(lastSyncTime: Long): List<ConversationEntity> =
-        withContext(Dispatchers.IO) {
-            val conversations = mutableListOf<ConversationEntity>()
+    private suspend fun fetchConversationsOptimized(lastSyncTime: Long): List<ConversationEntity> = withContext(Dispatchers.IO) {
+        val conversations = mutableListOf<ConversationEntity>()
+        val projection = arrayOf(
+            Telephony.Sms.Conversations.THREAD_ID,
+            Telephony.Sms.Conversations.SNIPPET
+        )
+
+        try {
+            val selection = if (lastSyncTime > 0) {
+                "${Telephony.Sms.DATE} > ?"
+            } else {
+                null
+            }
+
+            val selectionArgs = if (lastSyncTime > 0) {
+                arrayOf(lastSyncTime.toString())
+            } else {
+                null
+            }
+
+            contentResolver.query(
+                Telephony.Sms.Conversations.CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                "${Telephony.Sms.Conversations.DEFAULT_SORT_ORDER} LIMIT 500"
+            )?.use { cursor ->
+                val threadIdIdx = cursor.getColumnIndex(Telephony.Sms.Conversations.THREAD_ID)
+                val snippetIdx = cursor.getColumnIndex(Telephony.Sms.Conversations.SNIPPET)
+
+                val threadIds = mutableListOf<Long>()
+                while (cursor.moveToNext()) {
+                    threadIds.add(cursor.getLong(threadIdIdx))
+                }
+
+                if (threadIds.isEmpty()) {
+                    return@withContext emptyList()
+                }
+
+                val detailsMap = batchFetchConversationDetails(threadIds)
+
+                cursor.moveToPosition(-1)
+                while (cursor.moveToNext()) {
+                    val threadId = cursor.getLong(threadIdIdx)
+                    val details = detailsMap[threadId] ?: continue
+
+                    conversations.add(
+                        ConversationEntity(
+                            threadId = threadId,
+                            address = details.address,
+                            body = cursor.getString(snippetIdx) ?: "",
+                            date = details.date,
+                            read = details.read,
+                            senderName = getContactNameCached(details.address),
+                            photoUri = null,
+                            lastSyncTime = System.currentTimeMillis()
+                        )
+                    )
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.e("SmsRepoOpt", "Permission denied", e)
+        }
+
+        return@withContext conversations
+    }
+
+    private suspend fun batchFetchConversationDetails(threadIds: List<Long>): Map<Long, MessageDetails> = withContext(Dispatchers.IO) {
+        val detailsMap = mutableMapOf<Long, MessageDetails>()
+        if (threadIds.isEmpty()) return@withContext detailsMap
+
+        try {
             val projection = arrayOf(
-                Telephony.Sms.Conversations.THREAD_ID,
-                Telephony.Sms.Conversations.SNIPPET
+                Telephony.Sms.THREAD_ID,
+                Telephony.Sms.ADDRESS,
+                Telephony.Sms.DATE,
+                Telephony.Sms.READ
             )
 
-            try {
-                // Build selection for incremental sync
-                val selection = if (lastSyncTime > 0) {
-                    "${Telephony.Sms.DATE} > ?"
-                } else {
-                    null
-                }
+            contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                projection,
+                "${Telephony.Sms.THREAD_ID} IN (${threadIds.joinToString(",")})",
+                null,
+                "${Telephony.Sms.THREAD_ID}, ${Telephony.Sms.DATE} DESC"
+            )?.use { cursor ->
+                val threadIdIdx = cursor.getColumnIndex(Telephony.Sms.THREAD_ID)
+                val addressIdx = cursor.getColumnIndex(Telephony.Sms.ADDRESS)
+                val dateIdx = cursor.getColumnIndex(Telephony.Sms.DATE)
+                val readIdx = cursor.getColumnIndex(Telephony.Sms.READ)
 
-                val selectionArgs = if (lastSyncTime > 0) {
-                    arrayOf(lastSyncTime.toString())
-                } else {
-                    null
-                }
-
-                contentResolver.query(
-                    Telephony.Sms.Conversations.CONTENT_URI,
-                    projection,
-                    selection,
-                    selectionArgs,
-                    "${Telephony.Sms.Conversations.DEFAULT_SORT_ORDER} LIMIT 500"
-                )?.use { cursor ->
-                    val threadIdIdx = cursor.getColumnIndex(Telephony.Sms.Conversations.THREAD_ID)
-                    val snippetIdx = cursor.getColumnIndex(Telephony.Sms.Conversations.SNIPPET)
-
-                    // Collect all thread IDs first
-                    val threadIds = mutableListOf<Long>()
-                    while (cursor.moveToNext()) {
-                        threadIds.add(cursor.getLong(threadIdIdx))
-                    }
-
-                    if (threadIds.isEmpty()) {
-                        return@withContext emptyList()
-                    }
-
-                    // Batch fetch details for all threads
-                    val detailsMap = batchFetchConversationDetails(threadIds)
-
-                    // Build conversation entities
-                    cursor.moveToPosition(-1)
-                    while (cursor.moveToNext()) {
-                        val threadId = cursor.getLong(threadIdIdx)
-                        val details = detailsMap[threadId] ?: continue
-
-                        conversations.add(
-                            ConversationEntity(
-                                threadId = threadId,
-                                address = details.address,
-                                body = cursor.getString(snippetIdx) ?: "",
-                                date = details.date,
-                                read = details.read,
-                                senderName = getContactNameCached(details.address),
-                                photoUri = null,
-                                lastSyncTime = System.currentTimeMillis()
-                            )
+                var lastThreadId = -1L
+                while (cursor.moveToNext()) {
+                    val threadId = cursor.getLong(threadIdIdx)
+                    if (threadId != lastThreadId) {
+                        detailsMap[threadId] = MessageDetails(
+                            cursor.getString(addressIdx) ?: "Unknown",
+                            cursor.getLong(dateIdx),
+                            cursor.getInt(readIdx) == 1
                         )
+                        lastThreadId = threadId
                     }
                 }
-            } catch (e: SecurityException) {
-                Log.e("SmsRepoOpt", "Permission denied", e)
             }
-
-            return@withContext conversations
+        } catch (e: Exception) {
+            Log.e("SmsRepoOpt", "Batch fetch failed", e)
         }
 
-    /**
-     * OPTIMIZED: Single query for all thread details instead of N queries
-     */
-    private suspend fun batchFetchConversationDetails(threadIds: List<Long>): Map<Long, MessageDetails> =
-        withContext(Dispatchers.IO) {
-            val detailsMap = mutableMapOf<Long, MessageDetails>()
-            if (threadIds.isEmpty()) return@withContext detailsMap
+        return@withContext detailsMap
+    }
 
-            try {
-                val projection = arrayOf(
-                    Telephony.Sms.THREAD_ID,
-                    Telephony.Sms.ADDRESS,
-                    Telephony.Sms.DATE,
-                    Telephony.Sms.READ
-                )
-
-                // Query all latest messages in one go
-                contentResolver.query(
-                    Telephony.Sms.CONTENT_URI,
-                    projection,
-                    "${Telephony.Sms.THREAD_ID} IN (${threadIds.joinToString(",")})",
-                    null,
-                    "${Telephony.Sms.THREAD_ID}, ${Telephony.Sms.DATE} DESC"
-                )?.use { cursor ->
-                    val threadIdIdx = cursor.getColumnIndex(Telephony.Sms.THREAD_ID)
-                    val addressIdx = cursor.getColumnIndex(Telephony.Sms.ADDRESS)
-                    val dateIdx = cursor.getColumnIndex(Telephony.Sms.DATE)
-                    val readIdx = cursor.getColumnIndex(Telephony.Sms.READ)
-
-                    var lastThreadId = -1L
-                    while (cursor.moveToNext()) {
-                        val threadId = cursor.getLong(threadIdIdx)
-                        // Take only first (latest) message per thread
-                        if (threadId != lastThreadId) {
-                            detailsMap[threadId] = MessageDetails(
-                                cursor.getString(addressIdx) ?: "Unknown",
-                                cursor.getLong(dateIdx),
-                                cursor.getInt(readIdx) == 1
-                            )
-                            lastThreadId = threadId
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SmsRepoOpt", "Batch fetch failed", e)
-            }
-
-            return@withContext detailsMap
-        }
-
-    /**
-     * INCREMENTAL SYNC: Only fetch messages newer than last sync for this thread
-     */
     private suspend fun syncMessagesFromProvider(threadId: Long) = withContext(Dispatchers.IO) {
         if (!hasReadSmsPermission()) return@withContext
 
@@ -356,7 +325,6 @@ class SmsRepositoryOptimized @Inject constructor(
 
             if (messages.isNotEmpty()) {
                 messageDao.insertMessages(messages)
-                Log.d("SmsRepoOpt", "Synced ${messages.size} messages for thread $threadId")
             }
         } catch (e: Exception) {
             Log.e("SmsRepoOpt", "Message sync failed", e)
@@ -379,7 +347,6 @@ class SmsRepositoryOptimized @Inject constructor(
         )
 
         try {
-            // Build selection for incremental sync
             val selection = if (lastSyncTime > 0) {
                 "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.DATE} > ?"
             } else {
@@ -431,33 +398,22 @@ class SmsRepositoryOptimized @Inject constructor(
     }
 
     private suspend fun cleanupStaleConversations(currentThreadIds: List<Long>) {
-        // Delete conversations that no longer exist in provider
-        // This could be optimized further with a more sophisticated diff algorithm
+        // TODO: Implement cleanup of stale conversations if needed
     }
 
-    /**
-     * Cached contact lookup - prevents repeated ContentResolver queries
-     */
     private fun getContactNameCached(address: String): String? {
-        return contactCache.getOrPut(address) {
-            contactChecker.getContactName(address)
-        }
+        return contactChecker.getContactName(address)
     }
 
-    private fun isContactCached(address: String): Boolean? {
-        val name = getContactNameCached(address)
-        return name != null
-    }
-
-    override suspend fun archiveThreads(threadIds: Set<Long>) {
+    suspend fun archiveThreads(threadIds: Set<Long>) {
         userPreferences.archiveThreads(threadIds)
     }
 
-    override suspend fun unarchiveThreads(threadIds: Set<Long>) {
+    suspend fun unarchiveThreads(threadIds: Set<Long>) {
         userPreferences.unarchiveThreads(threadIds)
     }
 
-    override fun deleteThreads(threadIds: Set<Long>): Result<Unit> {
+    fun deleteThreads(threadIds: Set<Long>): Result<Unit> {
         if (!hasReadSmsPermission()) {
             return Result.failure(SecurityException("READ_SMS permission not granted"))
         }
@@ -471,7 +427,6 @@ class SmsRepositoryOptimized @Inject constructor(
                 )
                 Log.d("SmsRepoOpt", "Deleted $deletedCount messages from thread $threadId")
 
-                // Also delete from cache
                 repositoryScope.launch {
                     conversationDao.deleteConversation(threadId)
                     messageDao.deleteMessagesForThread(threadId)
@@ -484,7 +439,7 @@ class SmsRepositoryOptimized @Inject constructor(
         }
     }
 
-    override fun deleteMessages(messageIds: Set<Long>): Result<Unit> {
+    fun deleteMessages(messageIds: Set<Long>): Result<Unit> {
         if (!hasReadSmsPermission()) {
             return Result.failure(SecurityException("READ_SMS permission not granted"))
         }
@@ -508,7 +463,7 @@ class SmsRepositoryOptimized @Inject constructor(
         }
     }
 
-    override fun markThreadAsRead(threadId: Long): Result<Unit> {
+    fun markThreadAsRead(threadId: Long): Result<Unit> {
         if (!hasReadSmsPermission()) {
             return Result.failure(SecurityException("READ_SMS permission not granted"))
         }
@@ -530,7 +485,7 @@ class SmsRepositoryOptimized @Inject constructor(
         }
     }
 
-    override fun sendMessage(destinationAddress: String, body: String, subId: Int?) {
+    fun sendMessage(destinationAddress: String, body: String, subId: Int?) {
         try {
             val smsManager = getSmsManagerCompat(subId)
             val parts = smsManager.divideMessage(body)
