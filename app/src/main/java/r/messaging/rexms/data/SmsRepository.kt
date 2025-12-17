@@ -14,6 +14,7 @@ import android.telephony.SmsManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -57,41 +58,51 @@ class SmsRepository @Inject constructor(
             contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
             trySend(fetchConversations())
             awaitClose { contentResolver.unregisterContentObserver(observer) }
-        }.flowOn(Dispatchers.IO)
+        }
 
-        return conversationsFlow.combine(
-            userPreferences.archivedThreads
-        ) { conversations, archivedIds ->
-            conversations.map { it.copy(archived = it.threadId in archivedIds) }
-        }.combine(
-            userPreferences.autoArchiveUnknown
-        ) { conversations, autoArchiveEnabled ->
-            if (autoArchiveEnabled) {
-                // Auto-archive unknown contacts
+        return conversationsFlow
+            .combine(userPreferences.archivedThreads) { conversations, archivedIds ->
+                conversations.map { it.copy(archived = it.threadId in archivedIds) }
+            }
+            .combine(userPreferences.autoArchiveUnknown) { conversations, autoArchiveEnabled ->
+                if (!autoArchiveEnabled || conversations.isEmpty()) {
+                    return@combine conversations
+                }
+
+                // 1) Batch-resolve unknown addresses using the cached helper
+                val unknownAddresses = contactChecker.findUnknownAddresses(
+                    conversations.map { it.address }
+                )
+
+                if (unknownAddresses.isEmpty()) {
+                    return@combine conversations
+                }
+
+                // 2) Figure out which threads should be newly archived
                 val unknownThreadIds = conversations
-                    .filter { contactChecker.isUnknownContact(it.address) && !it.archived }
+                    .asSequence()
+                    .filter { it.address in unknownAddresses && !it.archived }
                     .map { it.threadId }
                     .toSet()
-                
+
                 if (unknownThreadIds.isNotEmpty()) {
-                    // Archive them in the background
-                    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                    // Fire-and-forget archive update on IO
+                    CoroutineScope(Dispatchers.IO).launch {
                         userPreferences.archiveThreads(unknownThreadIds)
                     }
                 }
-                
-                // Mark them as archived in the returned list
+
+                // 3) Mark unknown conversations as archived in the returned list
                 conversations.map { conversation ->
-                    if (contactChecker.isUnknownContact(conversation.address)) {
+                    if (conversation.address in unknownAddresses) {
                         conversation.copy(archived = true)
                     } else {
                         conversation
                     }
                 }
-            } else {
-                conversations
             }
-        }
+            // Ensure all of the above (including Contacts lookups) runs off the main thread
+            .flowOn(Dispatchers.IO)
     }
 
     fun getMessagesForThread(threadId: Long): Flow<List<Message>> = callbackFlow {
