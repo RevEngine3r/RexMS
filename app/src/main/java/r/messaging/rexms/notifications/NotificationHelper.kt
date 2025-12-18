@@ -98,7 +98,7 @@ class NotificationHelper @Inject constructor(
         val displayName = contactChecker.getContactName(sender) ?: sender
 
         val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setContentTitle(displayName)
             .setContentText(body)
             .setPriority(

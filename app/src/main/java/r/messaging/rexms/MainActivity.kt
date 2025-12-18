@@ -41,10 +41,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         // Enable edge-to-edge display for modern UI
         enableEdgeToEdge()
-        
+
         setContent {
             val currentTheme by userPreferences.theme
                 .collectAsState(initial = AppTheme.SYSTEM)
@@ -75,18 +75,21 @@ fun AppNavigation() {
                     add(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }
-            
+
             val allPermissionsGranted = requiredPermissions.all { permission ->
-                ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+                ContextCompat.checkSelfPermission(
+                    context,
+                    permission
+                ) == PackageManager.PERMISSION_GRANTED
             }
-            
+
             val isDefaultSmsApp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val roleManager = context.getSystemService(RoleManager::class.java)
                 roleManager?.isRoleHeld(RoleManager.ROLE_SMS) == true
             } else {
                 Telephony.Sms.getDefaultSmsPackage(context) == context.packageName
             }
-            
+
             allPermissionsGranted && isDefaultSmsApp
         }
     }.value
@@ -101,7 +104,7 @@ fun AppNavigation() {
         startDestination = if (hasAllPermissions) "home" else "permissions",
         route = "main_graph"  // Named graph for ViewModel scoping
     ) {
-        
+
         // Permission Screen
         composable("permissions") {
             PermissionScreen(
@@ -174,7 +177,7 @@ fun AppNavigation() {
 
         // 4. Archived Screen (Telegram Style Folder)
         composable("archived") { backStackEntry ->
-            val parentEntry = remember(backStackEntry) {
+            remember(backStackEntry) {
                 navController.getBackStackEntry("main_graph")
             }
             ArchivedScreen(
@@ -186,8 +189,7 @@ fun AppNavigation() {
                         launchSingleTop = true
                         restoreState = true
                     }
-                },
-                navController = navController
+                }
             )
         }
 
