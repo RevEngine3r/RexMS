@@ -22,13 +22,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import r.messaging.rexms.data.local.*
@@ -65,6 +69,21 @@ class SmsRepositoryOptimized @Inject constructor(
         private const val PREFETCH_DISTANCE = 10
         private const val INITIAL_LOAD_SIZE = 30
     }
+
+    // Convert DataStore flows to StateFlow for efficient access
+    private val archivedThreadsState: StateFlow<Set<Long>> = userPreferences.archivedThreads
+        .stateIn(
+            scope = repositoryScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptySet()
+        )
+
+    private val autoArchiveUnknownState: StateFlow<Boolean> = userPreferences.autoArchiveUnknown
+        .stateIn(
+            scope = repositoryScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false
+        )
 
     private fun hasReadSmsPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
@@ -103,8 +122,28 @@ class SmsRepositoryOptimized @Inject constructor(
                 pagingData.map { entity -> entity.toConversation() }
             }
             .map { pagingData ->
-                // Apply archived status from preferences
-                combineWithArchivedStatus(pagingData)
+                // Apply archived status and auto-archive logic
+                val archivedIds = archivedThreadsState.value
+                val autoArchive = autoArchiveUnknownState.value
+                
+                pagingData.map { conversation ->
+                    val isArchived = conversation.threadId in archivedIds
+                    
+                    // Lazy contact resolution only happens for visible items
+                    val shouldAutoArchive = if (autoArchive && !isArchived) {
+                        contactChecker.isUnknownContact(conversation.address)
+                    } else {
+                        false
+                    }
+                    
+                    if (shouldAutoArchive) {
+                        repositoryScope.launch {
+                            userPreferences.archiveThreads(setOf(conversation.threadId))
+                        }
+                    }
+                    
+                    conversation.copy(archived = isArchived || shouldAutoArchive)
+                }
             }
     }
 
@@ -157,34 +196,6 @@ class SmsRepositoryOptimized @Inject constructor(
                 }
             }
             .flowOn(Dispatchers.IO)
-    }
-
-    /**
-     * Apply archived status to paging data.
-     * This is lightweight since we only process visible items.
-     */
-    private suspend fun combineWithArchivedStatus(pagingData: PagingData<Conversation>): PagingData<Conversation> {
-        val archivedThreadIds = userPreferences.archivedThreads.replayCache.firstOrNull() ?: emptySet()
-        val autoArchiveEnabled = userPreferences.autoArchiveUnknown.replayCache.firstOrNull() ?: false
-        
-        return pagingData.map { conversation ->
-            val isArchived = conversation.threadId in archivedThreadIds
-            
-            // Lazy contact resolution only happens for visible items
-            val shouldAutoArchive = if (autoArchiveEnabled && !isArchived) {
-                contactChecker.isUnknownContact(conversation.address)
-            } else {
-                false
-            }
-            
-            if (shouldAutoArchive) {
-                repositoryScope.launch {
-                    userPreferences.archiveThreads(setOf(conversation.threadId))
-                }
-            }
-            
-            conversation.copy(archived = isArchived || shouldAutoArchive)
-        }
     }
 
     /**
