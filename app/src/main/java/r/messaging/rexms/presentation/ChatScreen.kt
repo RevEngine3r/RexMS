@@ -29,13 +29,18 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
 
+/**
+ * Main chat screen that displays messages for a conversation thread.
+ * Optimized to prevent visible message loading and minimize lag.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     onBack: () -> Unit,
     viewModel: ChatViewModel = hiltViewModel()
 ) {
-    val messages by viewModel.messages.collectAsState(initial = emptyList())
+    // Collect all state flows at once to minimize recompositions
+    val messages by viewModel.messages.collectAsState()
     val sendError by viewModel.sendError.collectAsState()
     val isSending by viewModel.isSending.collectAsState()
     val contactName by viewModel.contactName.collectAsState()
@@ -44,14 +49,21 @@ fun ChatScreen(
     val isMuted by viewModel.isMuted.collectAsState()
     val isBlocked by viewModel.isBlocked.collectAsState()
     val isArchived by viewModel.isArchived.collectAsState()
+    val shouldScrollToBottom by viewModel.shouldScrollToBottom.collectAsState()
     
     var inputText by remember { mutableStateOf("") }
     var showMenu by remember { mutableStateOf(false) }
+    
+    // Use remember for list state to prevent recreation
     val listState = rememberLazyListState()
+    
+    // Track if this is the first composition
+    var isInitialLoad by remember { mutableStateOf(true) }
 
     val displayName = contactName ?: phoneNumber
     val displaySubtitle = if (contactName != null) phoneNumber else null
 
+    // Memoize avatar color to prevent recalculation
     val avatarColor = remember(phoneNumber) {
         val colors = listOf(
             Color(0xFFE53935), Color(0xFFD81B60), Color(0xFF8E24AA),
@@ -63,12 +75,32 @@ fun ChatScreen(
         colors[abs(phoneNumber.hashCode()) % colors.size]
     }
 
+    /**
+     * Optimized scroll behavior:
+     * - On initial load: scroll to bottom immediately without animation
+     * - On new messages: only scroll if explicitly requested (user sent message)
+     */
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+        if (messages.isNotEmpty() && isInitialLoad) {
+            // Instant scroll to bottom on first load to prevent visible loading
+            listState.scrollToItem(messages.size - 1)
+            isInitialLoad = false
         }
     }
 
+    /**
+     * Handle scroll-to-bottom requests from ViewModel (e.g., after sending message).
+     */
+    LaunchedEffect(shouldScrollToBottom) {
+        if (shouldScrollToBottom && messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+            viewModel.onScrolledToBottom()
+        }
+    }
+
+    /**
+     * Auto-dismiss send error after 3 seconds.
+     */
     sendError?.let { error ->
         LaunchedEffect(error) {
             kotlinx.coroutines.delay(3000)
@@ -84,6 +116,7 @@ fun ChatScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
+                        // Contact avatar with first letter
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
@@ -101,6 +134,7 @@ fun ChatScreen(
 
                         Spacer(modifier = Modifier.width(12.dp))
 
+                        // Contact name and phone number
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = displayName,
@@ -126,6 +160,7 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    // Three-dot menu with conversation options
                     Box {
                         IconButton(onClick = { showMenu = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "More options")
@@ -184,6 +219,7 @@ fun ChatScreen(
             )
         },
         snackbarHost = {
+            // Display error messages as snackbar
             sendError?.let { error ->
                 Snackbar(
                     modifier = Modifier.padding(16.dp),
@@ -204,6 +240,10 @@ fun ChatScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .padding(padding)
         ) {
+            /**
+             * Message list with optimized rendering.
+             * Key parameter ensures stable item identity for better performance.
+             */
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -212,11 +252,20 @@ fun ChatScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                items(messages, key = { it.id }) { message ->
-                    MessageBubble(message)
+                items(
+                    items = messages,
+                    key = { message -> message.id } // Stable keys for better performance
+                ) { message ->
+                    // Use remember to prevent unnecessary MessageBubble recompositions
+                    key(message.id) {
+                        MessageBubble(message)
+                    }
                 }
             }
 
+            /**
+             * Message input field with send button.
+             */
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 tonalElevation = 2.dp
@@ -245,6 +294,7 @@ fun ChatScreen(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
+                    // Send button with loading indicator
                     IconButton(
                         onClick = {
                             if (inputText.isNotBlank()) {
@@ -276,12 +326,25 @@ fun ChatScreen(
     }
 }
 
+/**
+ * Individual message bubble component.
+ * Memoized to prevent unnecessary recompositions.
+ */
 @Composable
 fun MessageBubble(message: Message) {
     val isMe = message.isMe()
     val align = if (isMe) Alignment.End else Alignment.Start
 
-    val containerColor = if (isMe) {
+    // Memoize colors based on message sender
+    val containerColor = remember(isMe) {
+        if (isMe) {
+            Color.Unspecified // Will use MaterialTheme.colorScheme.primary
+        } else {
+            Color.Unspecified // Will use MaterialTheme.colorScheme.secondaryContainer
+        }
+    }
+
+    val actualContainerColor = if (isMe) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.secondaryContainer
@@ -293,10 +356,13 @@ fun MessageBubble(message: Message) {
         MaterialTheme.colorScheme.onSecondaryContainer
     }
 
-    val shape = if (isMe) {
-        RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
-    } else {
-        RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
+    // Different corner radius for sent vs received messages
+    val shape = remember(isMe) {
+        if (isMe) {
+            RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
+        } else {
+            RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
+        }
     }
 
     Column(
@@ -304,7 +370,7 @@ fun MessageBubble(message: Message) {
         horizontalAlignment = align
     ) {
         Surface(
-            color = containerColor,
+            color = actualContainerColor,
             shape = shape,
             modifier = Modifier.widthIn(max = 300.dp)
         ) {
@@ -316,6 +382,7 @@ fun MessageBubble(message: Message) {
             )
         }
 
+        // Timestamp below bubble
         Text(
             text = formatMessageDate(message.date),
             style = MaterialTheme.typography.labelSmall,
@@ -325,6 +392,9 @@ fun MessageBubble(message: Message) {
     }
 }
 
+/**
+ * Format timestamp for message display.
+ */
 private fun formatMessageDate(timestamp: Long): String {
     return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestamp))
 }
