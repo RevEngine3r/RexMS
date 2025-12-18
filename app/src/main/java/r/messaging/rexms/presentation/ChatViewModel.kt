@@ -1,13 +1,15 @@
 package r.messaging.rexms.presentation
 
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import r.messaging.rexms.data.ContactChecker
 import r.messaging.rexms.data.SmsRepositoryOptimized
@@ -25,7 +27,19 @@ class ChatViewModel @Inject constructor(
     private val threadId: Long = savedStateHandle["threadId"] ?: 0L
     private val address: String = savedStateHandle["address"] ?: ""
 
+    // Store LazyListState in ViewModel to survive configuration changes
+    val messageListState = LazyListState(
+        firstVisibleItemIndex = 0,
+        firstVisibleItemScrollOffset = 0
+    )
+
+    // Use stateIn for proper flow scoping
     val messages = repository.getMessagesForThread(threadId)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     private val _sendError = MutableStateFlow<String?>(null)
     val sendError: StateFlow<String?> = _sendError.asStateFlow()
