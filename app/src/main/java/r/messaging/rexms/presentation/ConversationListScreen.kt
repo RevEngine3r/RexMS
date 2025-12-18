@@ -11,7 +11,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material.icons.Icons
@@ -31,14 +30,27 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavController
+import androidx.paging.LoadState
+import androidx.paging.compose.LazyPagingItems
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import r.messaging.rexms.presentation.components.SwipeableConversationItem
 import r.messaging.rexms.presentation.components.ModernMenuItem
 
+/**
+ * Conversation list screen with Paging 3 for instant startup.
+ * 
+ * Performance features:
+ * - LazyPagingItems for efficient lazy loading
+ * - Only visible items + prefetch in memory
+ * - Instant display from Room cache
+ * - Background sync without blocking UI
+ * - Proper loading/error states
+ */
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationListScreen(
@@ -48,7 +60,6 @@ fun ConversationListScreen(
     onNavigateToNewConversation: () -> Unit,
     navController: NavController,
     viewModel: HomeViewModel = hiltViewModel(
-        // Scope ViewModel to navigation graph for state preservation
         remember(navController) {
             navController.getBackStackEntry("main_graph")
         }
@@ -59,8 +70,9 @@ fun ConversationListScreen(
     val scope = rememberCoroutineScope()
     val smsPermission = rememberPermissionState(Manifest.permission.READ_SMS)
 
-    // State - use proper state collection
-    val conversations by viewModel.conversations.collectAsState()
+    // PAGING 3: Collect as LazyPagingItems
+    val conversationsPagingItems = viewModel.conversationsPaged.collectAsLazyPagingItems()
+    
     val deleteError by viewModel.deleteError.collectAsState()
     val isDeleting by viewModel.isDeleting.collectAsState()
     var query by remember { mutableStateOf("") }
@@ -69,10 +81,10 @@ fun ConversationListScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     val selectedConversations = remember { mutableStateListOf<Long>() }
 
-    // Pull to refresh state - Material3 version
+    // Pull to refresh triggers paging refresh
     var isRefreshing by remember { mutableStateOf(false) }
 
-    // Logic to check/request Default SMS Role
+    // Check Default SMS app status
     var isDefaultApp by remember { mutableStateOf(true) }
     val checkDefaultStatus = remember {
         {
@@ -96,24 +108,33 @@ fun ConversationListScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Use derivedStateOf for computed values to prevent unnecessary recompositions
-    val filteredList = remember(query, conversations) {
-        derivedStateOf {
-            if (query.isEmpty()) {
-                conversations
-            } else {
-                conversations.filter {
-                    it.address.contains(query, true) || it.body.contains(query, true)
-                }
+    // Handle refresh state from paging
+    LaunchedEffect(conversationsPagingItems.loadState.refresh) {
+        if (conversationsPagingItems.loadState.refresh is LoadState.NotLoading) {
+            isRefreshing = false
+        }
+    }
+
+    // Filter conversations based on search query
+    // Note: With Paging 3, this filters already-loaded pages
+    // For true server-side search, implement in PagingSource
+    val filteredConversations = remember(query, conversationsPagingItems.itemCount) {
+        if (query.isEmpty()) {
+            (0 until conversationsPagingItems.itemCount).mapNotNull { 
+                conversationsPagingItems[it]
+            }
+        } else {
+            (0 until conversationsPagingItems.itemCount).mapNotNull {
+                conversationsPagingItems[it]
+            }.filter {
+                it.address.contains(query, true) || it.body.contains(query, true)
             }
         }
-    }.value
+    }
 
-    val (archived, active) = remember(filteredList) {
-        derivedStateOf {
-            filteredList.partition { it.archived }
-        }
-    }.value
+    val (archived, active) = remember(filteredConversations) {
+        filteredConversations.partition { it.archived }
+    }
 
     // Back Handler for Selection/Search
     BackHandler(enabled = isSearchActive || selectedConversations.isNotEmpty()) {
@@ -221,16 +242,16 @@ fun ConversationListScreen(
                 onRefresh = {
                     isRefreshing = true
                     scope.launch {
-                        delay(1000) // Simulate refresh - data auto-updates via Flow
-                        isRefreshing = false
+                        conversationsPagingItems.refresh()
                     }
                 }
             ) {
                 LazyColumn(
-                    state = viewModel.conversationListState,  // Use ViewModel state
+                    state = viewModel.conversationListState,
                     contentPadding = padding,
                     modifier = Modifier.fillMaxSize()
                 ) {
+                    // Archived header
                     if (archived.isNotEmpty() && !isSearchActive) {
                         item(key = "archived_header") {
                             ArchivedHeaderRow(
@@ -246,7 +267,9 @@ fun ConversationListScreen(
                         }
                     }
 
-                    if (active.isEmpty() && query.isNotEmpty()) {
+                    // Empty state
+                    if (active.isEmpty() && query.isNotEmpty() && 
+                        conversationsPagingItems.loadState.refresh is LoadState.NotLoading) {
                         item(key = "empty_state") {
                             Box(
                                 Modifier
@@ -262,11 +285,13 @@ fun ConversationListScreen(
                         }
                     }
 
-                    // CRITICAL: Add key parameter for stable items
+                    // Active conversations with paging
                     items(
-                        items = active,
-                        key = { conversation -> conversation.threadId }
-                    ) { conversation ->
+                        count = active.size,
+                        key = { index -> active[index].threadId }
+                    ) { index ->
+                        val conversation = active[index]
+                        
                         val onClickRemembered = remember(conversation.threadId, selectedConversations.size) {
                             {
                                 if (selectedConversations.isNotEmpty()) {
@@ -303,6 +328,48 @@ fun ConversationListScreen(
                             onArchive = onArchiveRemembered,
                             onDelete = onDeleteRemembered
                         )
+                    }
+
+                    // Loading indicator for next page
+                    if (conversationsPagingItems.loadState.append is LoadState.Loading) {
+                        item(key = "loading_more") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            }
+                        }
+                    }
+
+                    // Error state for next page
+                    if (conversationsPagingItems.loadState.append is LoadState.Error) {
+                        item(key = "error_loading_more") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "Error loading more conversations",
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Initial loading indicator
+                if (conversationsPagingItems.loadState.refresh is LoadState.Loading && 
+                    conversationsPagingItems.itemCount == 0) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
                     }
                 }
             }
