@@ -30,6 +30,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.NavController
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -45,15 +46,21 @@ fun ConversationListScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToArchived: () -> Unit,
     onNavigateToNewConversation: () -> Unit,
-    viewModel: HomeViewModel = hiltViewModel()
+    navController: NavController,
+    viewModel: HomeViewModel = hiltViewModel(
+        // Scope ViewModel to navigation graph for state preservation
+        remember(navController) {
+            navController.getBackStackEntry("main_graph")
+        }
+    )
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val smsPermission = rememberPermissionState(Manifest.permission.READ_SMS)
 
-    // State
-    val conversations by viewModel.conversations.collectAsState(initial = emptyList())
+    // State - use proper state collection
+    val conversations by viewModel.conversations.collectAsState()
     val deleteError by viewModel.deleteError.collectAsState()
     val isDeleting by viewModel.isDeleting.collectAsState()
     var query by remember { mutableStateOf("") }
@@ -89,13 +96,24 @@ fun ConversationListScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Partition Data
+    // Use derivedStateOf for computed values to prevent unnecessary recompositions
     val filteredList = remember(query, conversations) {
-        if (query.isEmpty()) conversations else conversations.filter {
-            it.address.contains(query, true) || it.body.contains(query, true)
+        derivedStateOf {
+            if (query.isEmpty()) {
+                conversations
+            } else {
+                conversations.filter {
+                    it.address.contains(query, true) || it.body.contains(query, true)
+                }
+            }
         }
-    }
-    val (archived, active) = filteredList.partition { it.archived }
+    }.value
+
+    val (archived, active) = remember(filteredList) {
+        derivedStateOf {
+            filteredList.partition { it.archived }
+        }
+    }.value
 
     // Back Handler for Selection/Search
     BackHandler(enabled = isSearchActive || selectedConversations.isNotEmpty()) {
@@ -209,17 +227,18 @@ fun ConversationListScreen(
                 }
             ) {
                 LazyColumn(
+                    state = viewModel.conversationListState,  // Use ViewModel state
                     contentPadding = padding,
                     modifier = Modifier.fillMaxSize()
                 ) {
                     if (archived.isNotEmpty() && !isSearchActive) {
-                        item {
+                        item(key = "archived_header") {
                             ArchivedHeaderRow(
                                 count = archived.size,
                                 onClick = onNavigateToArchived
                             )
                         }
-                        item {
+                        item(key = "archived_divider") {
                             HorizontalDivider(
                                 thickness = 0.5.dp,
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -228,7 +247,7 @@ fun ConversationListScreen(
                     }
 
                     if (active.isEmpty() && query.isNotEmpty()) {
-                        item {
+                        item(key = "empty_state") {
                             Box(
                                 Modifier
                                     .fillMaxWidth()
@@ -243,26 +262,46 @@ fun ConversationListScreen(
                         }
                     }
 
-                    items(active, key = { it.threadId }) { conversation ->
-                        SwipeableConversationItem(
-                            conversation = conversation,
-                            isSelected = selectedConversations.contains(conversation.threadId),
-                            onClick = {
+                    // CRITICAL: Add key parameter for stable items
+                    items(
+                        items = active,
+                        key = { conversation -> conversation.threadId }
+                    ) { conversation ->
+                        val onClickRemembered = remember(conversation.threadId, selectedConversations.size) {
+                            {
                                 if (selectedConversations.isNotEmpty()) {
                                     toggleSelection(selectedConversations, conversation.threadId)
                                 } else {
                                     onNavigateToChat(conversation.threadId, conversation.address)
                                 }
-                            },
-                            onLongClick = {
+                            }
+                        }
+
+                        val onLongClickRemembered = remember(conversation.threadId) {
+                            {
                                 toggleSelection(selectedConversations, conversation.threadId)
-                            },
-                            onArchive = {
+                            }
+                        }
+
+                        val onArchiveRemembered = remember(conversation.threadId) {
+                            {
                                 viewModel.archiveThreads(setOf(conversation.threadId))
-                            },
-                            onDelete = {
+                            }
+                        }
+
+                        val onDeleteRemembered = remember(conversation.threadId) {
+                            {
                                 viewModel.deleteThreads(setOf(conversation.threadId))
                             }
+                        }
+
+                        SwipeableConversationItem(
+                            conversation = conversation,
+                            isSelected = selectedConversations.contains(conversation.threadId),
+                            onClick = onClickRemembered,
+                            onLongClick = onLongClickRemembered,
+                            onArchive = onArchiveRemembered,
+                            onDelete = onDeleteRemembered
                         )
                     }
                 }
@@ -273,10 +312,11 @@ fun ConversationListScreen(
 
 @Composable
 fun ArchivedHeaderRow(count: Int, onClick: () -> Unit) {
+    val onClickRemembered = remember { onClick }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClick = onClickRemembered)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

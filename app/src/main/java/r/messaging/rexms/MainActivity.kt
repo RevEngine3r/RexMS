@@ -97,8 +97,9 @@ fun AppNavigation() {
     }
 
     NavHost(
-        navController = navController, 
-        startDestination = if (hasAllPermissions) "home" else "permissions"
+        navController = navController,
+        startDestination = if (hasAllPermissions) "home" else "permissions",
+        route = "main_graph"  // Named graph for ViewModel scoping
     ) {
         
         // Permission Screen
@@ -107,20 +108,43 @@ fun AppNavigation() {
                 onAllPermissionsGranted = {
                     navController.navigate("home") {
                         popUpTo("permissions") { inclusive = true }
+                        launchSingleTop = true
                     }
                 }
             )
         }
 
-        // 1. Home Screen (Conversation List)
-        composable("home") {
+        // 1. Home Screen (Conversation List) - Scoped to navigation graph
+        composable("home") { backStackEntry ->
+            val parentEntry = remember(backStackEntry) {
+                navController.getBackStackEntry("main_graph")
+            }
             ConversationListScreen(
                 onNavigateToChat = { threadId, address ->
-                    navController.navigate("chat/$threadId?address=$address")
+                    navController.navigate("chat/$threadId?address=$address") {
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 },
-                onNavigateToSettings = { navController.navigate("settings") },
-                onNavigateToArchived = { navController.navigate("archived") },
-                onNavigateToNewConversation = { navController.navigate("newConversation") }
+                onNavigateToSettings = {
+                    navController.navigate("settings") {
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                onNavigateToArchived = {
+                    navController.navigate("archived") {
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                onNavigateToNewConversation = {
+                    navController.navigate("newConversation") {
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                navController = navController
             )
         }
 
@@ -132,33 +156,53 @@ fun AppNavigation() {
                 navArgument("address") { type = NavType.StringType }
             )
         ) {
-            ChatScreen(onBack = { navController.popBackStack() })
+            ChatScreen(
+                onBack = {
+                    navController.popBackStack()
+                }
+            )
         }
 
         // 3. Settings Screen
         composable("settings") {
-            SettingsScreen(onBack = { navController.popBackStack() })
+            SettingsScreen(
+                onBack = {
+                    navController.popBackStack()
+                }
+            )
         }
 
         // 4. Archived Screen (Telegram Style Folder)
-        composable("archived") {
+        composable("archived") { backStackEntry ->
+            val parentEntry = remember(backStackEntry) {
+                navController.getBackStackEntry("main_graph")
+            }
             ArchivedScreen(
-                onBack = { navController.popBackStack() },
+                onBack = {
+                    navController.popBackStack()
+                },
                 onNavigateToChat = { threadId, address ->
-                    navController.navigate("chat/$threadId?address=$address")
-                }
+                    navController.navigate("chat/$threadId?address=$address") {
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                navController = navController
             )
         }
 
         // 5. New Conversation Screen
         composable("newConversation") {
             NewConversationScreen(
-                onBack = { navController.popBackStack() },
+                onBack = {
+                    navController.popBackStack()
+                },
                 onContactSelected = { address ->
                     scope.launch {
                         val threadId = getOrCreateThreadId(context, address)
                         navController.navigate("chat/$threadId?address=$address") {
                             popUpTo("newConversation") { inclusive = true }
+                            launchSingleTop = true
                         }
                     }
                 }
