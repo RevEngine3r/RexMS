@@ -32,10 +32,14 @@ class ContactChecker @Inject constructor(
         private const val TAG = "ContactChecker"
         private const val NAME_CACHE_SIZE = 512
         private const val CACHE_TTL_MILLIS = 5 * 60 * 1000L // 5 minutes
+        
+        // Sentinel value for unknown contacts (LruCache doesn't accept null)
+        private const val UNKNOWN_CONTACT_SENTINEL = ""
     }
 
     // LRU cache for contact names (most frequently accessed)
-    private val nameCache = LruCache<String, String?>(NAME_CACHE_SIZE)
+    // Note: LruCache doesn't accept null values, so we use empty string as sentinel
+    private val nameCache = LruCache<String, String>(NAME_CACHE_SIZE)
     
     // Simple in-memory cache: address -> isUnknown
     private val unknownCache = ConcurrentHashMap<String, Boolean>()
@@ -95,6 +99,8 @@ class ContactChecker @Inject constructor(
      * 
      * This is called only for visible items in the list,
      * dramatically reducing contact queries.
+     * 
+     * Returns null if contact is not found.
      */
     fun getContactName(address: String): String? {
         if (address.isBlank()) return null
@@ -102,13 +108,17 @@ class ContactChecker @Inject constructor(
 
         // Check LRU cache first
         val cached = nameCache.get(address)
-        if (cached !== null) {
-            return cached
+        if (cached != null) {
+            // Return null if sentinel value (unknown contact)
+            return if (cached == UNKNOWN_CONTACT_SENTINEL) null else cached
         }
 
         // Cache miss - query contacts provider
         val name = getContactNameInternal(address)
-        nameCache.put(address, name)
+        
+        // Store in cache using sentinel for null (LruCache doesn't accept null)
+        nameCache.put(address, name ?: UNKNOWN_CONTACT_SENTINEL)
+        
         return name
     }
 
@@ -128,7 +138,7 @@ class ContactChecker @Inject constructor(
             if (address.isNotBlank() && nameCache.get(address) == null) {
                 try {
                     val name = getContactNameInternal(address)
-                    nameCache.put(address, name)
+                    nameCache.put(address, name ?: UNKNOWN_CONTACT_SENTINEL)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to preload contact for $address", e)
                 }
@@ -161,6 +171,7 @@ class ContactChecker @Inject constructor(
 
     /**
      * Internal contact name lookup (no caching).
+     * Returns null if contact is not found.
      */
     private fun getContactNameInternal(address: String): String? {
         val uri = ContactsContract.PhoneLookup.CONTENT_FILTER_URI
@@ -175,7 +186,9 @@ class ContactChecker @Inject constructor(
                 null
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    return cursor.getString(0)
+                    val name = cursor.getString(0)
+                    // Return null if name is empty or blank
+                    return if (name.isNullOrBlank()) null else name
                 }
             }
         } catch (e: Exception) {
